@@ -1,0 +1,3466 @@
+From eb2baf2994a7d0b06dfc482dbeda8b031ab513e5 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Sun, 7 Dec 2014 11:41:13 +0100
+Subject: [PATCH] scheduling
+
+---
+ extension/scheduling/.gitignore                    |   2 +
+ extension/scheduling/jsreport.config.js            |   5 +
+ extension/scheduling/lib/scheduling.js             | 169 +++++++++++++++++++++
+ extension/scheduling/public/js/main_dev.js         |  61 ++++++++
+ .../scheduling/public/js/scheduling.detail.view.js |  49 ++++++
+ .../public/js/scheduling.entityRegistration.js     |  36 +++++
+ .../scheduling/public/js/scheduling.list.model.js  |  28 ++++
+ .../public/js/scheduling.list.toolbar.view.js      |  19 +++
+ .../scheduling/public/js/scheduling.list.view.js   |  24 +++
+ extension/scheduling/public/js/scheduling.model.js |  49 ++++++
+ .../scheduling/public/js/scheduling.tasks.model.js |  36 +++++
+ .../public/js/scheduling.toolbar.view.js           |  73 +++++++++
+ .../public/templates/scheduling-detail.html        |  47 ++++++
+ .../public/templates/scheduling-list-header.html   |   4 +
+ .../public/templates/scheduling-list-rows.html     |   5 +
+ .../public/templates/scheduling-list-toolbar.html  |   6 +
+ .../public/templates/scheduling-list.html          |   5 +
+ .../public/templates/scheduling-tasks-header.html  |   4 +
+ .../public/templates/scheduling-tasks-rows.html    |   5 +
+ .../public/templates/scheduling-toolbar.html       |   8 +
+ extension/scheduling/test/schedulingTest.js        |  73 +++++++++
+ 21 files changed, 708 insertions(+)
+
+diff --git a/extension/scheduling/.gitignore b/extension/scheduling/.gitignore
+new file mode 100644
+index 0000000000000000000000000000000000000000..9b57ea946cd37bcaa9e096b7cab28123780bb353
+--- /dev/null
++++ b/extension/scheduling/.gitignore
+@@ -0,0 +1,2 @@
++public/js/main.js
++public/js/main_embed.js
+\ No newline at end of file
+diff --git a/extension/scheduling/.npmignore b/extension/scheduling/.npmignore
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/extension/scheduling/jsreport.config.js b/extension/scheduling/jsreport.config.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd0d27632534ac9c3a54c74cadc48b56f64ab4c5
+--- /dev/null
++++ b/extension/scheduling/jsreport.config.js
+@@ -0,0 +1,5 @@
++﻿module.exports = {
++  "name": "scheduling",
++  "main": "lib/scheduling.js",
++  "dependencies": ["templates", "reports"]
++}
+\ No newline at end of file
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..2d3516e539d7dae8a972a0a291d1ccb7a502731a
+--- /dev/null
++++ b/extension/scheduling/lib/scheduling.js
+@@ -0,0 +1,169 @@
++﻿/*! 
++ * Copyright(c) 2014 Jan Blaha 
++ *
++ * Inline Data plugin able to add some sample data to rendering process
++ */
++
++var events = require("events"),
++    shortid = require("shortid"),
++    util = require("util"),
++    _ = require("underscore"),
++    q = require("q"),
++    CronJob = require('cron').CronJob,
++    CronTime = require('cron').CronTime;
++
++var Scheduling = function (reporter, definition) {
++    this.reporter = reporter;
++    this.definition = definition;
++    this.jobs = {};
++
++    this.ScheduleType = this.reporter.dataProvider.createEntityType("ScheduleType", {
++        _id: {type: "id", key: true, computed: true, nullable: false},
++        cron: {type: "string"},
++        name: {type: "string"},
++        templateShortid: {type: "string"},
++        creationDate: {type: "date"},
++        nextRun: {type: "date"},
++        shortid: {type: "string"},
++        modificationDate: {type: "date"}
++    });
++
++    this.TaskType = this.reporter.dataProvider.createEntityType("TaskType", {
++        _id: {type: "id", key: true, computed: true, nullable: false},
++        scheduleShortid: {type: "string"},
++        creationDate: {type: "date"},
++        finishDate: {type: "date"},
++        state: {type: "string"},
++        error: {type: "string"}
++    });
++
++    var schedulesSet = this.reporter.dataProvider.registerEntitySet("schedules", this.ScheduleType, {tableOptions: {humanReadableKeys: ["shortid"]}});
++    schedulesSet.beforeCreateListeners.add("schedule-before-create", Scheduling.prototype._beforeCreateHandler.bind(this));
++    schedulesSet.beforeUpdateListeners.add("schedule-before-update", Scheduling.prototype._beforeUpdateHandler.bind(this));
++    schedulesSet.afterReadListeners.add("schedule-after-read", Scheduling.prototype._afterReadHandler.bind(this));
++
++    this.reporter.dataProvider.registerEntitySet("tasks", this.TaskType, {tableOptions: {nedbPersistance: "singleFile"}});
++
++    this.reporter.reports.ReportType.addMember("taskId", {type: "id"});
++
++    reporter.initializeListener.add(definition.name, this, Scheduling.prototype._initialize);
++};
++
++util.inherits(Scheduling, events.EventEmitter);
++
++Scheduling.prototype._afterReadHandler = function (key, successResult, sets, query) {
++    var self = this;
++    successResult = Array.isArray(successResult) ? successResult : [successResult];
++
++    successResult.forEach(function (i) {
++        var cron = new CronTime(i.cron);
++        i.nextRun = cron._getNextDateFrom(new Date());
++    });
++
++    return true;
++};
++
++Scheduling.prototype._beforeCreateHandler = function (key, items) {
++    var entity = items[0];
++    if (!entity.shortid)
++        entity.shortid = shortid.generate();
++
++    entity.creationDate = new Date();
++    entity.modificationDate = new Date();
++
++    if (!this.suspendAutoRegistration) {
++        try {
++            this._registerJob(entity);
++        }
++        catch(e) {
++            console.log(e);
++            return false;
++        }
++    }
++    return true;
++};
++
++Scheduling.prototype._beforeUpdateHandler = function (key, items) {
++    var entity = items[0];
++    entity.modificationDate = new Date();
++
++    if (!this.suspendAutoRegistration) {
++        this.jobs[entity.shortid].stop();
++        try {
++            this._registerJob(entity);
++        }
++        catch(e) {
++            console.log(e);
++            return false;
++        }
++    }
++    return true;
++};
++
++Scheduling.prototype._initialize = function () {
++    var self = this;
++
++    for (var job in this.jobs) {
++        if (this.jobs.hasOwnProperty(job)) {
++            this.jobs[job].stop();
++        }
++    }
++    this.jobs = {};
++
++    return this.reporter.dataProvider.startContext().then(function (context) {
++        return context.schedules.toArray().then(function (schedules) {
++            schedules.forEach(Scheduling.prototype._registerJob.bind(self));
++        });
++    });
++};
++
++Scheduling.prototype._processSchedule = function (schedule) {
++    this.reporter.logger.debug("Processing schedule " + schedule.name);
++    this.emit("process", schedule);
++    var self = this;
++
++    return this.reporter.dataProvider.startContext().then(function (context) {
++        var task = new self.TaskType({creationDate: new Date(), scheduleShortid: schedule.shortid, state: "running"});
++        context.tasks.add(task);
++        return context.saveChanges().then(function () {
++            return context.tasks.single(function(t) { return t._id === this._id; }, { _id : task._id }).then(function(task) {
++                return self.reporter.render({
++                    template: {shortid: schedule.templateShortid},
++                    options: {
++                        scheduling: {taskId: task._id, scheduleShortid: schedule.shortid},
++                        reports: { save: true, mergeProperties: {taskId: task._id} },
++                        isRootRequest: true}
++                }).then(function () {
++                    self.reporter.logger.debug("Processing schedule " + schedule.name + " succeeded.");
++                    context.tasks.attach(task);
++                    task.finishDate = new Date();
++                    task.state = "success";
++                    return context.saveChanges();
++                }).catch(function(e) {
++                    self.reporter.logger.debug("Processing schedule " + schedule.name + " failed with :" + e.stack);
++                    context.tasks.attach(task);
++                    task.finishDate = new Date();
++                    task.state = "error";
++                    task.error = e.stack;
++                    return context.saveChanges();
++                });
++            });
++        });
++    });
++};
++
++Scheduling.prototype._registerJob = function(schedule) {
++    var self = this;
++    var job = new CronJob(schedule.cron, function () {
++            self._processSchedule(schedule);
++        }, function () {
++            // This function is executed when the job stops
++        }
++    );
++    self.jobs[schedule.shortid] = job;
++    job.start();
++};
++
++module.exports = function (reporter, definition) {
++    reporter[definition.name] = new Scheduling(reporter, definition);
++};
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/main_dev.js b/extension/scheduling/public/js/main_dev.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..662d5f4475836c77676b9448659895c917614d1d
+--- /dev/null
++++ b/extension/scheduling/public/js/main_dev.js
+@@ -0,0 +1,61 @@
++﻿define(["app", "marionette", "backbone",
++        "./scheduling.list.model", "./scheduling.list.view", "./scheduling.list.toolbar.view",
++        "./scheduling.model", "./scheduling.detail.view",
++        "./scheduling.toolbar.view", "./scheduling.entityRegistration"],
++    function (app, Marionette, Backbone, ListModel, ListView, ListToolbarView, Model, DetailView,
++              ToolbarView, entityRegistration) {
++
++        app.module("scheduling", function (module) {
++            var Router = Backbone.Router.extend({
++                initialize: function () {
++                    app.listenTo(app, "schedule-saved", function (model) {
++                        window.location.hash = "/extension/scheduling/detail/" + model.get("shortid");
++                    });
++                },
++
++                routes: {
++                    "extension/scheduling/list": "scheduling",
++                    "extension/scheduling/detail/:id": "schedulingDetail",
++                    "extension/scheduling/detail": "schedulingDetail"
++                },
++
++                scheduling: function () {
++                    this.navigate("/extension/scheduling/list");
++
++                    var model = new ListModel();
++                    app.layout.showToolbarViewComposition(new ListView({ collection: model }), new ListToolbarView({ collection: model }));
++                    model.fetch();
++                },
++
++                schedulingDetail: function (id) {
++                    var model = new Model();
++
++                    if (id != null) {
++                        model.set("shortid", id);
++                    }
++
++                    model.fetch({
++                        success: function () {
++                            app.layout.showToolbarViewComposition(new DetailView({model: model}), new ToolbarView({model: model}));
++                        }
++                    });
++                }
++            });
++
++            app.scheduling.on("created", function () {
++                app.data.router.scheduling();
++            });
++
++            app.scheduling.router = new Router();
++
++            app.on("menu-render", function (context) {
++                context.result += "<li><a href='/#/extension/scheduling/list'>Scheduling</a></li>";
++            });
++
++            app.on("menu-actions-render", function (context) {
++                context.result += "<li><a id='createScheduleCommand' href='#/extension/scheduling/detail' class='validate-leaving'>Create Schedule</a></li>";
++            });
++
++            app.on("entity-registration", entityRegistration);
++        });
++    });
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/scheduling.detail.view.js b/extension/scheduling/public/js/scheduling.detail.view.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..756622b30bb4848c3ce1933ddf869c79d1a59a4d
+--- /dev/null
++++ b/extension/scheduling/public/js/scheduling.detail.view.js
+@@ -0,0 +1,49 @@
++﻿define(["marionette", "core/view.base", "underscore", "core/dataGrid", "jquery", "app"], function(Marionette, ViewBase, _, DataGrid, $, app) {
++    return ViewBase.extend({
++        template: "scheduling-detail",
++
++        initialize: function() {
++            var self = this;
++            _.bindAll(this, "getTemplates");
++            this.listenTo(this.model, "sync", this.render);
++        },
++
++        getTemplates: function () {
++            return this.model.templates;
++        },
++
++        validateLeaving: function() {
++            return !this.model.hasChangesSyncLastSync();
++        },
++
++        onDomRefresh: function () {
++            var self = this;
++            this.dataGrid = DataGrid.show({
++                collection: this.model.tasks,
++                filter: this.model.tasks.filter,
++                idKey: "_id",
++                el: $("#tasksGridBox"),
++                headerTemplate: "scheduling-tasks-header",
++                rowsTemplate: "scheduling-tasks-rows",
++                showSelection: false,
++                onRender: function() {
++                    self.$el.find(".reportDownload").click(function() {
++                        if ($(this).attr("data-error")) {
++                            $.dialog({
++                                header: "Error",
++                                content: $(this).attr("data-error"),
++                                hideSubmit: true,
++                                error: true
++                            });
++                            return;
++                        }
++                        var taskId = $(this).attr("data-id");
++                        app.dataContext.reports.single(function(r) { return r.taskId === this.id; }, { id : taskId}).then(function(report) {
++                            window.open(app.serverUrl + "api/report/" + report._id + "/content", "_blank");
++                        });
++                    });
++                }
++            });
++        }
++    });
++});
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/scheduling.entityRegistration.js b/extension/scheduling/public/js/scheduling.entityRegistration.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..2a8b6be496862ecf8332ed893368f53f7b4c0fd7
+--- /dev/null
++++ b/extension/scheduling/public/js/scheduling.entityRegistration.js
+@@ -0,0 +1,36 @@
++define([], function() {
++    return function(context) {
++
++        $data.Class.define("$entity.Schedule", $data.Entity, null, {
++            _id: { 'key': true, 'nullable': false, 'computed': true, 'type': 'Edm.String' },
++            cron: {type: "string"},
++            name: {type: "string"},
++            templateShortid: {type: "string"},
++            creationDate: {type: "date"},
++            nextRun: {type: "date"},
++            shortid: {type: "string"},
++            modificationDate: {type: "date"}
++        }, null);
++
++        $entity.Schedule.prototype.toString = function () {
++            return "Schedule " + (this.name || "");
++        };
++
++        $data.Class.define("$entity.Task", $data.Entity, null, {
++            _id: { 'key': true, 'nullable': false, 'computed': true, 'type': 'Edm.String' },
++            scheduleShortid: {type: "string"},
++            creationDate: {type: "date"},
++            finishDate: {type: "date"},
++            state: {type: "string"},
++            error: {type: "string"}
++        });
++
++        $entity.Task.prototype.toString = function () {
++            return "Task";
++        };
++
++        $entity.Report.addMember("taskId", { type: "string" });
++        context["schedules"] = { type: $data.EntitySet, elementType: $entity.Schedule };
++        context["tasks"] = { type: $data.EntitySet, elementType: $entity.Task };
++    };
++});
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/scheduling.list.model.js b/extension/scheduling/public/js/scheduling.list.model.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..2485339ea08c1b637055c48668f2e0b3b2bcec49
+--- /dev/null
++++ b/extension/scheduling/public/js/scheduling.list.model.js
+@@ -0,0 +1,28 @@
++﻿define(["app", "backbone", "core/dataGrid", "./scheduling.model"], function (app, Backbone, DataGrid, DataModel) {
++    return Backbone.Collection.extend({
++
++        initialize: function () {
++            var self = this;
++            this.filter = new DataGrid.Filter.Base();
++            this.filter.bind("apply", function () {
++                self.fetch();
++            });
++        },
++        
++        parse: function (data) {
++            if (data.totalCount != null)
++                this.filter.set("totalCount", data.totalCount);
++
++            return data;
++        },
++        
++        fetchQuery: function () {
++            return app.dataContext.schedules.applyFilter(this.filter).toArray();
++        },
++
++        model: DataModel
++    });
++});
++
++
++
+diff --git a/extension/scheduling/public/js/scheduling.list.toolbar.view.js b/extension/scheduling/public/js/scheduling.list.toolbar.view.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9ff9f9ea4ef6da3354ef75163c4418af7f3e8b2
+--- /dev/null
++++ b/extension/scheduling/public/js/scheduling.list.toolbar.view.js
+@@ -0,0 +1,19 @@
++﻿define(["jquery", "app", "core/utils", "core/view.base", "underscore"],
++    function ($, app, Utils, LayoutBase) {
++        return LayoutBase.extend({
++            template: "scheduling-list-toolbar",
++            
++            initialize: function () {
++            },
++         
++            
++            events: {
++                "click #deleteCommand": "deleteCommand"
++            },
++            
++            deleteCommand: function() {
++                this.contentView.dataGrid.deleteItems();
++            }
++        });
++    });
++
+diff --git a/extension/scheduling/public/js/scheduling.list.view.js b/extension/scheduling/public/js/scheduling.list.view.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..d77930d4fa405cbeb3610634cfe0cbee0c227a97
+--- /dev/null
++++ b/extension/scheduling/public/js/scheduling.list.view.js
+@@ -0,0 +1,24 @@
++﻿define(["marionette", "core/dataGrid", "core/view.base"], function (Marionette, DataGrid, ViewBase) {
++    return ViewBase.extend({
++        template: "scheduling-list",
++
++        initialize: function () {
++            this.listenTo(this.collection, "sync", this.render);
++            this.listenTo(this.collection, "remove", this.render);
++        },
++
++        onDomRefresh: function () {
++            this.dataGrid = DataGrid.show({
++                collection: this.collection,
++                filter: this.collection.filter,
++                idKey: "shortid",
++                onShowDetail: function (id) {
++                    window.location.hash = "extension/scheduling/detail/" + id;
++                },
++                el: $("#schemaGridBox"),
++                headerTemplate: "scheduling-list-header",
++                rowsTemplate: "scheduling-list-rows"
++            });
++        }
++    });
++}); 
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/scheduling.model.js b/extension/scheduling/public/js/scheduling.model.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..75de65fab954857993a5436e03aab9a9e1c715a7
+--- /dev/null
++++ b/extension/scheduling/public/js/scheduling.model.js
+@@ -0,0 +1,49 @@
++﻿define(["app", "core/jaydataModel", "underscore", "./scheduling.tasks.model"], function (app, ModelBase, _, TasksModel) {
++
++    return ModelBase.extend({
++        contextSet: function () {
++            return app.dataContext.schedules;
++        },
++
++        fetch: function (options) {
++            var self = this;
++
++            this.tasks.scheduleShortid = self.get("shortid");
++
++            function fetchSchedule(options) {
++                    app.dataContext.templates.map(function(t) { return { shortid: t.shortid, name: t.name }; }).toArray().then(function (templates) {
++                        self.templates = templates;
++                        self.templates.unshift({ name: "-- select template --"});
++                        if (self.get("shortid")) {
++                            return app.dataContext.schedules.single(function (r) {
++                                return r.shortid === this.id;
++                            }, {id: self.get("shortid")}).then(function (schedule) {
++                                self.set(schedule.initData);
++                                self.set("templateName", _.findWhere(templates, {shortid: schedule.templateShortid}).name);
++                                options.success();
++                            });
++                        } else {
++                            self.set("templateName", "-- select template --");
++                            options.success();
++                        }
++                    });
++            }
++
++            fetchSchedule({
++                success: function() {
++                    if (self.tasks.scheduleShortid) {
++                        self.tasks.fetch(options);
++                    } else {
++                        options.success();
++                    }
++                }
++            });
++        },
++
++        _initialize: function () {
++            var self = this;
++            this.Entity = $entity.Schedule;
++            this.tasks = new TasksModel();
++        }
++    });
++});
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/scheduling.tasks.model.js b/extension/scheduling/public/js/scheduling.tasks.model.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..800d0394253946391e4631d964cb8cbd150fb187
+--- /dev/null
++++ b/extension/scheduling/public/js/scheduling.tasks.model.js
+@@ -0,0 +1,36 @@
++define(["app", "backbone", "core/dataGrid"], function (app, Backbone, DataGrid) {
++
++    var Model = Backbone.Model.extend({});
++
++    return Backbone.Collection.extend({
++
++        initialize: function () {
++            var self = this;
++            this.filter = new DataGrid.Filter.Base();
++            this.filter.bind("apply", function () {
++                self.fetch();
++            });
++        },
++
++        parse: function (data) {
++            if (data.totalCount != null)
++                this.filter.set("totalCount", data.totalCount);
++
++            return data;
++        },
++
++        fetchQuery: function () {
++            return app.dataContext.tasks
++                .filter(function(t) { return t.scheduleShortid === this.scheduleShortid; }, { scheduleShortid : this.scheduleShortid})
++                .orderByDescending(function(t) {
++                    return t.finishDate;
++                })
++                .applyFilter(this.filter).toArray();
++        },
++
++        model: Model
++    });
++});
++
++
++
+diff --git a/extension/scheduling/public/js/scheduling.toolbar.view.js b/extension/scheduling/public/js/scheduling.toolbar.view.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9f330e6ccd42f68104617b7fa7a03d9d3c306aa
+--- /dev/null
++++ b/extension/scheduling/public/js/scheduling.toolbar.view.js
+@@ -0,0 +1,73 @@
++﻿define(["jquery", "app", "core/utils", "core/view.base"],
++    function ($, app, Utils, LayoutBase) {
++        return LayoutBase.extend({
++            template: "scheduling-toolbar",
++
++            initialize: function () {
++                $(document).on('keydown.data-detail', this.hotkey.bind(this));
++            },
++
++            events: {
++                "click #saveCommand": "save"
++            },
++
++            save: function () {
++                if (!this.validate())
++                    return;
++
++                var self = this;
++                this.model.save({}, {
++                    success: function () {
++                        app.trigger("schedule-saved", self.model);
++                        self.model.fetch({
++                            success: function () {
++                                self.contentView.render();
++                            }
++                        });
++                    },
++                    error: function(m, e) {
++                        e.handled = true;
++                        $.dialog({
++                            header: "Error",
++                            content: "Saving Schedule failed. Maybe you have wrong cron syntax.",
++                            hideSubmit: true,
++                            error: true
++                        });
++                    }
++                });
++            },
++
++            hotkey: function (e) {
++                if (e.ctrlKey && e.which === 83) {
++                    this.save();
++                    e.preventDefault();
++                    return false;
++                }
++            },
++
++            onValidate: function () {
++                var res = [];
++
++                if (!this.model.get("name"))
++                    res.push({
++                        message: "Name cannot be empty"
++                    });
++
++                if (!this.model.get("cron"))
++                    res.push({
++                        message: "Cron cannot be empty"
++                    });
++
++                if (!this.model.get("templateShortid"))
++                    res.push({
++                        message: "Choose a template"
++                    });
++
++                return res;
++            },
++
++            onClose: function () {
++                $(document).off(".schedule-detail");
++            }
++        });
++    });
+\ No newline at end of file
+diff --git a/extension/scheduling/public/templates/scheduling-detail.html b/extension/scheduling/public/templates/scheduling-detail.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..084def8cae59c641e240a3e850ba82907d986f1c
+--- /dev/null
++++ b/extension/scheduling/public/templates/scheduling-detail.html
+@@ -0,0 +1,47 @@
++﻿<div>
++    {{title #data}}{{/title}}
++</div>
++
++
++<div class="row">
++    <div class="col-lg-6">
++        <div>
++            <span class="side-title">Cron</span>
++            <input type="text" class="form-control area-mini" placeholder="00 30 11 * * 1-5" name="cron"
++                   value="{{:cron}}">
++        </div>
++        <div>
++            <span class="side-title">Template</span>
++
++            <div class="btn-group" data-binding="templateShortid">
++                <button class="btn btn-info btn-xs dropdown-button" id="schema" data-value="{{:templateShortid}}">
++                    {{:templateName}}
++                </button>
++                <button class="btn btn-info btn-xs dropdown-toggle" data-toggle="dropdown">
++                    <span class="caret"></span>
++                </button>
++                <ul class="dropdown-menu pull-right" role="menu">
++                    {{for ~getTemplates()}}
++                    <li role="presentation"><a role="menuitem" tabindex="-1" data-value="{{:shortid}}">{{:name}}</a>
++                    </li>
++                    {{/for}}
++                </ul>
++            </div>
++        </div>
++    </div>
++    <div class="col-lg-6">
++        <div>
++            <span class="side-title">Next Run</span>
++            <span class="form-control area-mini" placeholder="00 30 11 * * 1-5">{{:~dateToString(nextRun)}}</span>
++        </div>
++    </div>
++</div>
++
++<div class="row">
++    <div class="col-lg-12">
++        <div id="tasksGridBox"></div>
++    </div>
++</div>
++
++
++
+diff --git a/extension/scheduling/public/templates/scheduling-list-header.html b/extension/scheduling/public/templates/scheduling-list-header.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..02dd881f33ec8d5af04a1eaf384ef6728492f990
+--- /dev/null
++++ b/extension/scheduling/public/templates/scheduling-list-header.html
+@@ -0,0 +1,4 @@
++﻿<th>NAME</th>
++<th>NEXT RUN</th>
++<th>LAST MODIFIED</th>
++<th>CREATED</th>
+\ No newline at end of file
+diff --git a/extension/scheduling/public/templates/scheduling-list-rows.html b/extension/scheduling/public/templates/scheduling-list-rows.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..b6f8fb8a8b2871ad00fedcf7514591c8f3533e0d
+--- /dev/null
++++ b/extension/scheduling/public/templates/scheduling-list-rows.html
+@@ -0,0 +1,5 @@
++﻿<td class="link"><a>{{:name}}</a></td>
++<td>{{:~dateToString(nextRun)}}</td>
++<td>{{:~dateToString(modificationDate)}}</td>
++<td>{{:~dateToString(creationDate)}}</td>
++
+diff --git a/extension/scheduling/public/templates/scheduling-list-toolbar.html b/extension/scheduling/public/templates/scheduling-list-toolbar.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..d85372c965698174de7a88dfbae0110939eabdd6
+--- /dev/null
++++ b/extension/scheduling/public/templates/scheduling-list-toolbar.html
+@@ -0,0 +1,6 @@
++﻿<div class="navbar-header submenu">
++    <ul class="nav navbar-nav sub-header">
++        <li><a href="/#/extension/scheduling/detail"><i class="glyphicon glyphicon-plus"></i>New</a></li>
++        <li><a id="deleteCommand"><i class="glyphicon glyphicon-trash"></i>Delete</a></li>
++    </ul>
++</div>
+\ No newline at end of file
+diff --git a/extension/scheduling/public/templates/scheduling-list.html b/extension/scheduling/public/templates/scheduling-list.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..1c0faacd53bb7ce95ba284b978dfdbc9a89ef560
+--- /dev/null
++++ b/extension/scheduling/public/templates/scheduling-list.html
+@@ -0,0 +1,5 @@
++﻿<span><h3>all items</h3></span>
++
++<div id="schemaGridBox">
++    
++</div>
+\ No newline at end of file
+diff --git a/extension/scheduling/public/templates/scheduling-tasks-header.html b/extension/scheduling/public/templates/scheduling-tasks-header.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..e60b1802881833183a485afbbfa9eaf7c37f87b0
+--- /dev/null
++++ b/extension/scheduling/public/templates/scheduling-tasks-header.html
+@@ -0,0 +1,4 @@
++<th>STATE</th>
++<th>REPORT</th>
++<th>START</th>
++<th>FINISH</th>
+diff --git a/extension/scheduling/public/templates/scheduling-tasks-rows.html b/extension/scheduling/public/templates/scheduling-tasks-rows.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc554f26fb31267642383dc5472d261b7619a4d0
+--- /dev/null
++++ b/extension/scheduling/public/templates/scheduling-tasks-rows.html
+@@ -0,0 +1,5 @@
++<td><span class="label {{if state == "error"}}label-danger{{else}}label-success{{/if}}">{{:state}}</span></td>
++<td data-id="{{:_id}}" class="reportDownload" data-error="{{:error}}"><span class="label {{if state == "error"}}label-danger{{else}}label-success{{/if}}"><i class="fa fa-download " style="padding-right:10px"></i>download</span></td>
++<td>{{:~dateToString(creationDate)}}</td>
++<td>{{:~dateToString(finishDate)}}</td>
++
+diff --git a/extension/scheduling/public/templates/scheduling-toolbar.html b/extension/scheduling/public/templates/scheduling-toolbar.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..8faf2c51486b3cd1581ae5e2d7c5a6e80dfbc582
+--- /dev/null
++++ b/extension/scheduling/public/templates/scheduling-toolbar.html
+@@ -0,0 +1,8 @@
++﻿<div class="navbar-header submenu">
++    <ul class="nav navbar-nav sub-header">
++        <li><a id="saveCommand"><i class="glyphicon glyphicon-floppy-save"></i>Save</a></li>
++    </ul>
++    <ul class="nav navbar-nav sub-header pull-right">
++         <li><a target="_blank" href="http://jsreport.net/learn/inline-data"><i class="fa fa-lightbulb-o"></i>Help</a></li>
++    </ul>
++</div>
+\ No newline at end of file
+diff --git a/extension/scheduling/test/schedulingTest.js b/extension/scheduling/test/schedulingTest.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..7ee439ad676d719328552dce305d7c586a9c6677
+--- /dev/null
++++ b/extension/scheduling/test/schedulingTest.js
+@@ -0,0 +1,73 @@
++﻿/*globals describe, it, beforeEach, afterEach*/
++
++
++var assert = require("assert"),
++    join = require("path").join,
++    path = require("path"),
++    should = require("should"),
++    describeReporting = require("../../../test/helpers.js").describeReporting;
++
++describeReporting(path.join(__dirname, "../../"), ["html", "templates", "reports", "scheduling"], function (reporter) {
++
++    describe('with scheduling extension', function () {
++
++        it('creating schedule should plan it', function (done) {
++            this.timeout(3500);
++
++            var requests = [];
++
++            reporter.beforeRenderListeners.insert(0, "test", this, function (request, response) {
++                requests.push(request);
++            });
++
++            reporter.dataProvider.startContext().then(function (context) {
++                return reporter.templates.create(context, {content: "foo", shortid: "foo"}).then(function () {
++                    context.schedules.add(new reporter.scheduling.ScheduleType({
++                        cron: "* * * * * *",
++                        templateShortid: "foo"
++                    }));
++                    return context.saveChanges();
++                });
++            }).then(function () {
++                setTimeout(function () {
++
++                    requests.length.should.be.exactly(2);
++                    requests[0].options.scheduling.taskId.should.be.ok;
++                    requests[0].template.shortid.should.be.exactly("foo");
++
++                    done();
++                }, 2500);
++            }).catch(done);
++        });
++
++        it('init schedule should plan it', function (done) {
++            this.timeout(3500);
++
++            var counter = 0;
++
++            reporter.beforeRenderListeners.insert(0, "test init", this, function (request, response) {
++                counter++;
++            });
++
++            reporter.scheduling.suspendAutoRegistration = true;
++
++            reporter.dataProvider.startContext().then(function (context) {
++                return reporter.templates.create(context, {content: "foo", shortid: "foo"}).then(function () {
++                    context.schedules.add(new reporter.scheduling.ScheduleType({
++                        cron: "* * * * * *",
++                        templateShortid: "foo"
++                    }));
++                    return context.saveChanges();
++                });
++            }).then(function () {
++                return reporter.scheduling._initialize();
++            }).then(function () {
++                setTimeout(function () {
++                    counter.should.be.exactly(2);
++                    done();
++                }, 2500);
++            }).catch(done);
++        });
++    });
++});
++
+
+From 2d85c4e641f7ea00daef0279bcccb671351719be Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Mon, 8 Dec 2014 08:03:56 +0100
+Subject: [PATCH] running scripts after report rendering
+
+---
+ extension/scheduling/lib/scheduling.js             | 42 ++++++++++++++------
+ .../public/js/scheduling.entityRegistration.js     |  1 +
+ extension/scheduling/public/js/scheduling.model.js |  5 +++
+ .../public/templates/scheduling-detail.html        | 45 +++++++++++++---------
+ 4 files changed, 63 insertions(+), 30 deletions(-)
+
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index 2d3516e539d7dae8a972a0a291d1ccb7a502731a..56b540ea02c09b7170fbb425adfb968a12c90667 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -25,6 +25,7 @@ var Scheduling = function (reporter, definition) {
+         creationDate: {type: "date"},
+         nextRun: {type: "date"},
+         shortid: {type: "string"},
++        enabled: {type: "bool"},
+         modificationDate: {type: "date"}
+     });
+ 
+@@ -40,6 +41,7 @@ var Scheduling = function (reporter, definition) {
+     var schedulesSet = this.reporter.dataProvider.registerEntitySet("schedules", this.ScheduleType, {tableOptions: {humanReadableKeys: ["shortid"]}});
+     schedulesSet.beforeCreateListeners.add("schedule-before-create", Scheduling.prototype._beforeCreateHandler.bind(this));
+     schedulesSet.beforeUpdateListeners.add("schedule-before-update", Scheduling.prototype._beforeUpdateHandler.bind(this));
++    schedulesSet.beforeDeleteListeners.add("schedule-before-delete", Scheduling.prototype._beforeDeleteHandler.bind(this));
+     schedulesSet.afterReadListeners.add("schedule-after-read", Scheduling.prototype._afterReadHandler.bind(this));
+ 
+     this.reporter.dataProvider.registerEntitySet("tasks", this.TaskType, {tableOptions: {nedbPersistance: "singleFile"}});
+@@ -52,12 +54,11 @@ var Scheduling = function (reporter, definition) {
+ util.inherits(Scheduling, events.EventEmitter);
+ 
+ Scheduling.prototype._afterReadHandler = function (key, successResult, sets, query) {
+-    var self = this;
+     successResult = Array.isArray(successResult) ? successResult : [successResult];
+ 
+     successResult.forEach(function (i) {
+         var cron = new CronTime(i.cron);
+-        i.nextRun = cron._getNextDateFrom(new Date());
++        i.nextRun = i.enabled ? cron._getNextDateFrom(new Date()) : null;
+     });
+ 
+     return true;
+@@ -70,13 +71,13 @@ Scheduling.prototype._beforeCreateHandler = function (key, items) {
+ 
+     entity.creationDate = new Date();
+     entity.modificationDate = new Date();
++    entity.enabled = entity.enabled !== false; //default false
+ 
+     if (!this.suspendAutoRegistration) {
+         try {
+             this._registerJob(entity);
+         }
+-        catch(e) {
+-            console.log(e);
++        catch (e) {
+             return false;
+         }
+     }
+@@ -88,18 +89,25 @@ Scheduling.prototype._beforeUpdateHandler = function (key, items) {
+     entity.modificationDate = new Date();
+ 
+     if (!this.suspendAutoRegistration) {
+-        this.jobs[entity.shortid].stop();
+         try {
+             this._registerJob(entity);
+         }
+-        catch(e) {
+-            console.log(e);
++        catch (e) {
+             return false;
+         }
+     }
+     return true;
+ };
+ 
++Scheduling.prototype._beforeDeleteHandler = function (key, items) {
++    var entity = items[0];
++
++    if (this.jobs[entity.shortid])
++        this.jobs[entity.shortid].stop();
++
++    return true;
++};
++
+ Scheduling.prototype._initialize = function () {
+     var self = this;
+ 
+@@ -126,20 +134,23 @@ Scheduling.prototype._processSchedule = function (schedule) {
+         var task = new self.TaskType({creationDate: new Date(), scheduleShortid: schedule.shortid, state: "running"});
+         context.tasks.add(task);
+         return context.saveChanges().then(function () {
+-            return context.tasks.single(function(t) { return t._id === this._id; }, { _id : task._id }).then(function(task) {
++            return context.tasks.single(function (t) {
++                return t._id === this._id;
++            }, {_id: task._id}).then(function (task) {
+                 return self.reporter.render({
+                     template: {shortid: schedule.templateShortid},
+                     options: {
+                         scheduling: {taskId: task._id, scheduleShortid: schedule.shortid},
+-                        reports: { save: true, mergeProperties: {taskId: task._id} },
+-                        isRootRequest: true}
++                        reports: {save: true, mergeProperties: {taskId: task._id}},
++                        isRootRequest: true
++                    }
+                 }).then(function () {
+                     self.reporter.logger.debug("Processing schedule " + schedule.name + " succeeded.");
+                     context.tasks.attach(task);
+                     task.finishDate = new Date();
+                     task.state = "success";
+                     return context.saveChanges();
+-                }).catch(function(e) {
++                }).catch(function (e) {
+                     self.reporter.logger.debug("Processing schedule " + schedule.name + " failed with :" + e.stack);
+                     context.tasks.attach(task);
+                     task.finishDate = new Date();
+@@ -152,7 +163,14 @@ Scheduling.prototype._processSchedule = function (schedule) {
+     });
+ };
+ 
+-Scheduling.prototype._registerJob = function(schedule) {
++Scheduling.prototype._registerJob = function (schedule) {
++    if (this.jobs[schedule.shortid])
++        this.jobs[schedule.shortid].stop();
++
++    if (!schedule.enabled) {
++        return;
++    }
++
+     var self = this;
+     var job = new CronJob(schedule.cron, function () {
+             self._processSchedule(schedule);
+diff --git a/extension/scheduling/public/js/scheduling.entityRegistration.js b/extension/scheduling/public/js/scheduling.entityRegistration.js
+index 2a8b6be496862ecf8332ed893368f53f7b4c0fd7..f584dab3e9073223e5556636c0ae5b230b7e96dd 100644
+--- a/extension/scheduling/public/js/scheduling.entityRegistration.js
++++ b/extension/scheduling/public/js/scheduling.entityRegistration.js
+@@ -8,6 +8,7 @@ define([], function() {
+             templateShortid: {type: "string"},
+             creationDate: {type: "date"},
+             nextRun: {type: "date"},
++            enabled: {type: "boolean"},
+             shortid: {type: "string"},
+             modificationDate: {type: "date"}
+         }, null);
+diff --git a/extension/scheduling/public/js/scheduling.model.js b/extension/scheduling/public/js/scheduling.model.js
+index 75de65fab954857993a5436e03aab9a9e1c715a7..81643e2a915fd8f75ae0e8abb221a64d74eee392 100644
+--- a/extension/scheduling/public/js/scheduling.model.js
++++ b/extension/scheduling/public/js/scheduling.model.js
+@@ -31,6 +31,7 @@
+ 
+             fetchSchedule({
+                 success: function() {
++                    self.trigger("sync");
+                     if (self.tasks.scheduleShortid) {
+                         self.tasks.fetch(options);
+                     } else {
+@@ -40,6 +41,10 @@
+             });
+         },
+ 
++        defaults: {
++            enabled: true
++        },
++
+         _initialize: function () {
+             var self = this;
+             this.Entity = $entity.Schedule;
+diff --git a/extension/scheduling/public/templates/scheduling-detail.html b/extension/scheduling/public/templates/scheduling-detail.html
+index 084def8cae59c641e240a3e850ba82907d986f1c..586629326327cdc733cada46c81fce2b0254dbe2 100644
+--- a/extension/scheduling/public/templates/scheduling-detail.html
++++ b/extension/scheduling/public/templates/scheduling-detail.html
+@@ -10,24 +10,6 @@
+             <input type="text" class="form-control area-mini" placeholder="00 30 11 * * 1-5" name="cron"
+                    value="{{:cron}}">
+         </div>
+-        <div>
+-            <span class="side-title">Template</span>
+-
+-            <div class="btn-group" data-binding="templateShortid">
+-                <button class="btn btn-info btn-xs dropdown-button" id="schema" data-value="{{:templateShortid}}">
+-                    {{:templateName}}
+-                </button>
+-                <button class="btn btn-info btn-xs dropdown-toggle" data-toggle="dropdown">
+-                    <span class="caret"></span>
+-                </button>
+-                <ul class="dropdown-menu pull-right" role="menu">
+-                    {{for ~getTemplates()}}
+-                    <li role="presentation"><a role="menuitem" tabindex="-1" data-value="{{:shortid}}">{{:name}}</a>
+-                    </li>
+-                    {{/for}}
+-                </ul>
+-            </div>
+-        </div>
+     </div>
+     <div class="col-lg-6">
+         <div>
+@@ -38,6 +20,33 @@
+ </div>
+ 
+ <div class="row">
++    <div class="col-lg-6">
++        <span class="side-title">Template</span>
++
++        <div class="btn-group" data-binding="templateShortid">
++            <button class="btn btn-info btn-xs dropdown-button" id="schema" data-value="{{:templateShortid}}">
++                {{:templateName}}
++            </button>
++            <button class="btn btn-info btn-xs dropdown-toggle" data-toggle="dropdown">
++                <span class="caret"></span>
++            </button>
++            <ul class="dropdown-menu pull-right" role="menu">
++                {{for ~getTemplates()}}
++                <li role="presentation"><a role="menuitem" tabindex="-1" data-value="{{:shortid}}">{{:name}}</a>
++                </li>
++                {{/for}}
++            </ul>
++        </div>
++    </div>
++    <div class="col-lg-6">
++        <div>
++            <span class="side-title">Enabled</span>
++            <input type="checkbox" name="enabled" checked="checked"/>
++        </div>
++    </div>
++</div>
++
++<div class="row">
+     <div class="col-lg-12">
+         <div id="tasksGridBox"></div>
+     </div>
+
+From 133364e63c59ac633364a4562a64312458ee5993 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Wed, 10 Dec 2014 10:20:57 +0100
+Subject: [PATCH] scheduling for multiple servers, finishing scripts updates
+
+---
+ extension/scheduling/lib/jobProcessor.js           | 161 +++++++++++++++++
+ extension/scheduling/lib/scheduling.js             | 140 +++++----------
+ .../public/js/scheduling.entityRegistration.js     |   3 +-
+ .../public/templates/scheduling-toolbar.html       |   2 +-
+ extension/scheduling/test/jobProcessorTest.js      | 194 +++++++++++++++++++++
+ extension/scheduling/test/schedulingTest.js        |  70 ++++----
+ 6 files changed, 436 insertions(+), 134 deletions(-)
+
+diff --git a/extension/scheduling/lib/jobProcessor.js b/extension/scheduling/lib/jobProcessor.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..059ad402e4ae578c5ecf4ff71186072dc2feec2e
+--- /dev/null
++++ b/extension/scheduling/lib/jobProcessor.js
+@@ -0,0 +1,161 @@
++var CronTime = require('cron').CronTime,
++    _ = require("underscore"),
++    q = require("q");
++
++var interval;
++var JobProcessor = module.exports = function (executionHandler, dataProvider, logger, TaskType, options) {
++
++    if (!options.taskPingTimeout)
++        options.taskPingTimeout = 2 * options.interval;
++
++    this.dataProvider = dataProvider;
++    this.logger = logger;
++    this.options = options;
++    this.executionHandler = executionHandler;
++    this.currentlyRunningTasks = [];
++    this.TaskType = TaskType;
++
++    options.now = options.now || function() { return new Date();};
++
++    if (interval) {
++        clearInterval(interval);
++    }
++};
++
++JobProcessor.prototype.start = function () {
++    interval = setInterval(JobProcessor.prototype.process.bind(this), this.options.interval);
++};
++
++JobProcessor.prototype.stop = function () {
++    clearInterval(interval);
++};
++
++JobProcessor._schedulesToProcessFilter = function (s) {
++    return s.nextRun < this.now && s.state === "planned" && s.enabled === true;
++};
++
++JobProcessor._tasksToRecoverFilter = function (s) {
++    return s.ping < this.treshold && s.state === "running";
++};
++
++JobProcessor.prototype._pingRunningTasks = function (context) {
++    var ids = this.currentlyRunningTasks.map(function (t) {
++        return t._id;
++    });
++    return context.tasks.rawUpdate({id: {$in: ids}}, {$set: {ping: this.options.now()}});
++};
++
++JobProcessor.prototype._findTasksToRecover = function (context) {
++    var now = this.options.now();
++    return context.tasks.filter(JobProcessor._tasksToRecoverFilter, {treshold: new Date(now.getTime() - this.options.taskPingTimeout)}).toArray().then(function (tasks) {
++        if (tasks.length === 0)
++            return [];
++
++        return context.schedules.toArray().then(function (schedules) {
++            tasks.forEach(function (t) {
++                t.schedule = _.findWhere(schedules, {shortid: t.scheduleShortid});
++            });
++
++            return tasks;
++        });
++    });
++};
++
++JobProcessor.prototype.process = function (options) {
++    var self = this;
++    options = options || {};
++
++    if (this.currentlyRunningTasks.length >= this.options.maxJobs) {
++        return q();
++    }
++
++    return this.dataProvider.startContext().then(function (context) {
++        return self._pingRunningTasks(context).then(function () {
++            return self._findTasksToRecover(context).then(function (tasks) {
++                var promise = q.all(tasks.map(function (task) {
++                    self.logger.info("Recovering task " + task.schedule.name);
++                    return self.processOne(task.schedule, task, context);
++                }));
++                return options.waitForJobToFinish ? promise : q();
++            }).then(function () {
++                return context.schedules.filter(JobProcessor._schedulesToProcessFilter, {now: self.options.now()}).toArray().then(function (schedules) {
++                    var promise = q.all(schedules.map(function (s) {
++                        return self.processOne(s, null, context);
++                    }));
++
++                    return options.waitForJobToFinish ? promise : q();
++                });
++            });
++        });
++    }).catch(function (e) {
++        self.logger.error("unable to load planned schedules " + e.stack);
++    });
++};
++
++JobProcessor.prototype.processOne = function (schedule, task, context) {
++    var self = this;
++
++    if (this.currentlyRunningTasks.length >= this.options.maxJobs) {
++        return;
++    }
++
++    return context.schedules.rawUpdate({
++        _id: schedule._id,
++        state: "planned"
++    }, {$set: {state: "planning"}}).then(function (count) {
++        if (count === 1) {
++            return self.execute(schedule, task, context);
++        }
++    }).catch(function (e) {
++        self.logger.error("unable to update schedule state" + e.stack);
++    });
++};
++
++JobProcessor.prototype.execute = function (schedule, task, context) {
++    var self = this;
++
++    if (!task) {
++        task = new (this.TaskType)({creationDate: this.options.now(), scheduleShortid: schedule.shortid, state: "running", ping: this.options.now()});
++        context.tasks.add(task);
++    }
++
++    this.currentlyRunningTasks.push(task);
++
++    return context.saveChanges().then(function () {
++        var cron = new CronTime(schedule.cron);
++        var nextRun = cron._getNextDateFrom(new Date(schedule.nextRun.getTime() + 1000));
++
++        return context.schedules.rawUpdate({
++            _id: schedule._id
++        }, {$set: {state: "planned", nextRun: new Date(nextRun.getTime())}});
++    }).then(function() {
++        return self.executionHandler(schedule, task, context).then(function () {
++            self.logger.debug("Processing schedule " + schedule.name + " succeeded.");
++            return context.tasks.rawUpdate(
++                {_id: task._id},
++                {
++                    $set: {
++                        state: "success",
++                        finishDate: self.options.now()
++                    }
++                });
++        }).catch(function (e) {
++            self.logger.debug("Processing schedule " + schedule.name + " failed with :" + e.stack);
++            return context.tasks.rawUpdate(
++                {_id: task._id},
++                {
++                    $set: {
++                        state: "error",
++                        error: e.stack,
++                        finishDate: self.options.now()
++                    }
++                });
++        }).fin(function () {
++            self.currentlyRunningTasks = _.filter(self.currentlyRunningTasks, function (task) {
++                return task._id !== task._id;
++            });
++        });
++    });
++};
++
++
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index 56b540ea02c09b7170fbb425adfb968a12c90667..82a34b5c3ba57d4729f89c8876a3374fbd35eb21 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -9,13 +9,14 @@ var events = require("events"),
+     util = require("util"),
+     _ = require("underscore"),
+     q = require("q"),
+-    CronJob = require('cron').CronJob,
+-    CronTime = require('cron').CronTime;
++    CronTime = require('cron').CronTime,
++    JobProcessor = require("./jobProcessor");
++
++var jobProcessor;
+ 
+ var Scheduling = function (reporter, definition) {
+     this.reporter = reporter;
+     this.definition = definition;
+-    this.jobs = {};
+ 
+     this.ScheduleType = this.reporter.dataProvider.createEntityType("ScheduleType", {
+         _id: {type: "id", key: true, computed: true, nullable: false},
+@@ -26,7 +27,8 @@ var Scheduling = function (reporter, definition) {
+         nextRun: {type: "date"},
+         shortid: {type: "string"},
+         enabled: {type: "bool"},
+-        modificationDate: {type: "date"}
++        modificationDate: {type: "date"},
++        state: {type: "string"}
+     });
+ 
+     this.TaskType = this.reporter.dataProvider.createEntityType("TaskType", {
+@@ -35,7 +37,8 @@ var Scheduling = function (reporter, definition) {
+         creationDate: {type: "date"},
+         finishDate: {type: "date"},
+         state: {type: "string"},
+-        error: {type: "string"}
++        error: {type: "string"},
++        ping: {type: "date"}
+     });
+ 
+     var schedulesSet = this.reporter.dataProvider.registerEntitySet("schedules", this.ScheduleType, {tableOptions: {humanReadableKeys: ["shortid"]}});
+@@ -54,13 +57,6 @@ var Scheduling = function (reporter, definition) {
+ util.inherits(Scheduling, events.EventEmitter);
+ 
+ Scheduling.prototype._afterReadHandler = function (key, successResult, sets, query) {
+-    successResult = Array.isArray(successResult) ? successResult : [successResult];
+-
+-    successResult.forEach(function (i) {
+-        var cron = new CronTime(i.cron);
+-        i.nextRun = i.enabled ? cron._getNextDateFrom(new Date()) : null;
+-    });
+-
+     return true;
+ };
+ 
+@@ -69,18 +65,15 @@ Scheduling.prototype._beforeCreateHandler = function (key, items) {
+     if (!entity.shortid)
+         entity.shortid = shortid.generate();
+ 
++    if (!entity.cron)
++        return false;
++
++    entity.state = "planned";
+     entity.creationDate = new Date();
+     entity.modificationDate = new Date();
+     entity.enabled = entity.enabled !== false; //default false
+-
+-    if (!this.suspendAutoRegistration) {
+-        try {
+-            this._registerJob(entity);
+-        }
+-        catch (e) {
+-            return false;
+-        }
+-    }
++    var cron = new CronTime(entity.cron);
++    entity.nextRun = new Date(cron._getNextDateFrom(new Date()));
+     return true;
+ };
+ 
+@@ -88,100 +81,51 @@ Scheduling.prototype._beforeUpdateHandler = function (key, items) {
+     var entity = items[0];
+     entity.modificationDate = new Date();
+ 
+-    if (!this.suspendAutoRegistration) {
+-        try {
+-            this._registerJob(entity);
+-        }
+-        catch (e) {
+-            return false;
+-        }
+-    }
++    if (!entity.cron)
++        return false;
++
++    var cron = new CronTime(entity.cron);
++    entity.nextRun = cron._getNextDateFrom(new Date());
++    entity.state = "planned";
++
+     return true;
+ };
+ 
+ Scheduling.prototype._beforeDeleteHandler = function (key, items) {
+     var entity = items[0];
+-
+-    if (this.jobs[entity.shortid])
+-        this.jobs[entity.shortid].stop();
+-
+     return true;
+ };
+ 
+ Scheduling.prototype._initialize = function () {
+     var self = this;
+-
+-    for (var job in this.jobs) {
+-        if (this.jobs.hasOwnProperty(job)) {
+-            this.jobs[job].stop();
+-        }
+-    }
+-    this.jobs = {};
+-
+-    return this.reporter.dataProvider.startContext().then(function (context) {
+-        return context.schedules.toArray().then(function (schedules) {
+-            schedules.forEach(Scheduling.prototype._registerJob.bind(self));
+-        });
+-    });
+ };
+ 
+-Scheduling.prototype._processSchedule = function (schedule) {
+-    this.reporter.logger.debug("Processing schedule " + schedule.name);
+-    this.emit("process", schedule);
+-    var self = this;
+-
+-    return this.reporter.dataProvider.startContext().then(function (context) {
+-        var task = new self.TaskType({creationDate: new Date(), scheduleShortid: schedule.shortid, state: "running"});
+-        context.tasks.add(task);
+-        return context.saveChanges().then(function () {
+-            return context.tasks.single(function (t) {
+-                return t._id === this._id;
+-            }, {_id: task._id}).then(function (task) {
+-                return self.reporter.render({
+-                    template: {shortid: schedule.templateShortid},
+-                    options: {
+-                        scheduling: {taskId: task._id, scheduleShortid: schedule.shortid},
+-                        reports: {save: true, mergeProperties: {taskId: task._id}},
+-                        isRootRequest: true
+-                    }
+-                }).then(function () {
+-                    self.reporter.logger.debug("Processing schedule " + schedule.name + " succeeded.");
+-                    context.tasks.attach(task);
+-                    task.finishDate = new Date();
+-                    task.state = "success";
+-                    return context.saveChanges();
+-                }).catch(function (e) {
+-                    self.reporter.logger.debug("Processing schedule " + schedule.name + " failed with :" + e.stack);
+-                    context.tasks.attach(task);
+-                    task.finishDate = new Date();
+-                    task.state = "error";
+-                    task.error = e.stack;
+-                    return context.saveChanges();
+-                });
+-            });
+-        });
+-    });
++Scheduling.prototype.stop = function () {
++    jobProcessor.stop();
+ };
+ 
+-Scheduling.prototype._registerJob = function (schedule) {
+-    if (this.jobs[schedule.shortid])
+-        this.jobs[schedule.shortid].stop();
+-
+-    if (!schedule.enabled) {
+-        return;
+-    }
+-
+-    var self = this;
+-    var job = new CronJob(schedule.cron, function () {
+-            self._processSchedule(schedule);
+-        }, function () {
+-            // This function is executed when the job stops
++Scheduling.prototype.renderReport = function (schedule, task, context) {
++    return this.reporter.render({
++        template: {shortid: schedule.templateShortid},
++        options: {
++            scheduling: {taskId: task._id, scheduleShortid: schedule.shortid},
++            reports: {save: true, mergeProperties: {taskId: task._id}},
++            isRootRequest: true
+         }
+-    );
+-    self.jobs[schedule.shortid] = job;
+-    job.start();
++    });
+ };
+ 
+ module.exports = function (reporter, definition) {
+     reporter[definition.name] = new Scheduling(reporter, definition);
++
++
++    definition.options = _.extend({
++        interval: 5000,
++        maxJobs: 5
++    }, definition.options);
++
++    if (!jobProcessor) {
++        jobProcessor = new JobProcessor(Scheduling.prototype.renderReport.bind(this), reporter.dataProvider, reporter.logger, reporter[definition.name].TaskType, definition.options);
++        jobProcessor.start();
++    }
+ };
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/scheduling.entityRegistration.js b/extension/scheduling/public/js/scheduling.entityRegistration.js
+index f584dab3e9073223e5556636c0ae5b230b7e96dd..7c8f7773a133803d9c9b3275beed96cf48e6d31f 100644
+--- a/extension/scheduling/public/js/scheduling.entityRegistration.js
++++ b/extension/scheduling/public/js/scheduling.entityRegistration.js
+@@ -23,7 +23,8 @@ define([], function() {
+             creationDate: {type: "date"},
+             finishDate: {type: "date"},
+             state: {type: "string"},
+-            error: {type: "string"}
++            error: {type: "string"},
++            ping: {type: "date"}
+         });
+ 
+         $entity.Task.prototype.toString = function () {
+diff --git a/extension/scheduling/public/templates/scheduling-toolbar.html b/extension/scheduling/public/templates/scheduling-toolbar.html
+index 8faf2c51486b3cd1581ae5e2d7c5a6e80dfbc582..b3e98eb3f755a11edb4c1fa940c449d546a0fb3b 100644
+--- a/extension/scheduling/public/templates/scheduling-toolbar.html
++++ b/extension/scheduling/public/templates/scheduling-toolbar.html
+@@ -3,6 +3,6 @@
+         <li><a id="saveCommand"><i class="glyphicon glyphicon-floppy-save"></i>Save</a></li>
+     </ul>
+     <ul class="nav navbar-nav sub-header pull-right">
+-         <li><a target="_blank" href="http://jsreport.net/learn/inline-data"><i class="fa fa-lightbulb-o"></i>Help</a></li>
++         <li><a target="_blank" href="http://jsreport.net/learn/scheduling"><i class="fa fa-lightbulb-o"></i>Help</a></li>
+     </ul>
+ </div>
+\ No newline at end of file
+diff --git a/extension/scheduling/test/jobProcessorTest.js b/extension/scheduling/test/jobProcessorTest.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..83124ea7381c6bb65413d346637a3697e1d1a889
+--- /dev/null
++++ b/extension/scheduling/test/jobProcessorTest.js
+@@ -0,0 +1,194 @@
++/*globals describe, it, beforeEach, afterEach*/
++
++
++var assert = require("assert"),
++    join = require("path").join,
++    path = require("path"),
++    should = require("should"),
++    q = require("q"),
++    JobProcessor = require("../lib/jobProcessor"),
++    describeReporting = require("../../../test/helpers.js").describeReporting;
++
++describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "scheduling"], function (reporter) {
++
++    describe('for jobProcessor', function () {
++
++        it('process should call handler and create task', function (done) {
++            this.timeout(3000);
++            reporter.scheduling.stop();
++
++            reporter.dataProvider.startContext().then(function (context) {
++                context.schedules.add(new reporter.scheduling.ScheduleType({
++                    cron: "*/1 * * * * *"
++                }));
++                return context.saveChanges().then(function () {
++                    var counter = 0;
++
++                    function exec() {
++                        counter++;
++                        return q();
++                    }
++
++                    var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
++                        interval: 50,
++                        maxJobs: 1
++                    });
++                    return jobProcessor.process({waitForJobToFinish: true}).then(function () {
++                        return context.tasks.toArray().then(function (tasks) {
++                            tasks.length.should.be.exactly(1);
++                            tasks[0].state.should.be.exactly("success");
++                            tasks[0].finishDate.should.be.ok;
++                            done();
++                        });
++                    });
++                });
++            }).catch(done);
++        });
++
++        it('should not cross maxJobs', function (done) {
++            this.timeout(2000);
++            reporter.scheduling.stop();
++
++            reporter.dataProvider.startContext().then(function (context) {
++                context.schedules.add(new reporter.scheduling.ScheduleType({
++                    cron: "*/1 * * * * *"
++                }));
++                return context.saveChanges();
++            }).then(function () {
++
++                var counter = 0;
++
++                function exec() {
++                    counter++;
++                    return q();
++                }
++
++                var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
++                    interval: 50,
++                    maxJobs: 0
++                });
++                return jobProcessor.process({waitForJobToFinish: true}).then(function () {
++                    counter.should.be.exactly(0);
++                    done();
++                });
++            }).catch(done);
++        });
++
++        it('should recover failed tasks', function (done) {
++            reporter.scheduling.stop();
++
++            reporter.dataProvider.startContext().then(function (context) {
++                var schedule = new reporter.scheduling.ScheduleType({
++                    cron: "* * * * * 2090"
++                });
++
++                context.schedules.add(schedule);
++                return context.saveChanges().then(function () {
++                    context.tasks.add(new reporter.scheduling.TaskType({
++                        ping: new Date(1),
++                        state: "running",
++                        scheduleShortid: schedule.shortid
++                    }));
++                    return context.saveChanges();
++                }).then(function () {
++                    var counter = 0;
++
++                    function exec() {
++                        counter++;
++                        return q();
++                    }
++
++                    var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
++                        interval: 20,
++                        maxJobs: 1,
++                        taskPingTimeout: 10
++                    });
++
++                    return jobProcessor.process({waitForJobToFinish: true}).then(function () {
++                        counter.should.be.exactly(1);
++                        done();
++                    });
++                });
++            }).catch(done);
++        });
++
++        it('should ping running tasks', function (done) {
++            reporter.scheduling.stop();
++
++            reporter.dataProvider.startContext().then(function (context) {
++                var schedule = new reporter.scheduling.ScheduleType({
++                    cron: "* * * * * 2090"
++                });
++
++                context.schedules.add(schedule);
++                return context.saveChanges().then(function () {
++                    var task = new reporter.scheduling.TaskType({
++                        ping: new Date(new Date().getTime() - 1000),
++                        state: "running",
++                        scheduleShortid: schedule.shortid
++                    });
++                    context.tasks.add(task);
++                    return context.saveChanges().then(function () {
++                        var counter = 0;
++
++                        function exec() {
++                            return q();
++                        }
++
++                        var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
++                            interval: 20,
++                            maxJobs: 1
++                        });
++                        jobProcessor.currentlyRunningTasks.push(task);
++                        return jobProcessor.process({waitForJobToFinish: true}).then(function () {
++                            return context.tasks.toArray().then(function (tasks) {
++                                tasks[0].ping.should.not.be.exactly(task.ping);
++                                done();
++                            });
++                        });
++                    });
++                });
++            }).catch(done);
++        });
++    });
++});
++
++describe("JobProcessor._schedulesToProcessFilter", function () {
++    it('should pass for planned in past and enabled', function () {
++        this.now = new Date();
++        JobProcessor._schedulesToProcessFilter.call(this, {
++            enabled: true,
++            nextRun: new Date(1),
++            state: "planned"
++        }).should.be.ok;
++    });
++
++    it('should skip disabled', function () {
++        this.now = new Date();
++        JobProcessor._schedulesToProcessFilter.call(this, {
++            enabled: false,
++            nextRun: new Date(1),
++            state: "planned"
++        }).should.not.be.ok;
++    });
++
++    it('should skip running', function () {
++        this.now = new Date();
++        JobProcessor._schedulesToProcessFilter.call(this, {
++            enabled: true,
++            nextRun: new Date(1),
++            state: "running"
++        }).should.not.be.ok;
++    });
++
++    it('should skip in future', function () {
++        this.now = new Date();
++        JobProcessor._schedulesToProcessFilter.call(this, {
++            enabled: true,
++            nextRun: new Date(2090, 1, 1),
++            state: "running"
++        }).should.not.be.ok;
++    });
++});
++
++
+diff --git a/extension/scheduling/test/schedulingTest.js b/extension/scheduling/test/schedulingTest.js
+index 7ee439ad676d719328552dce305d7c586a9c6677..e6aaf9eba62ebb2212e194e881f7e2d0db050d44 100644
+--- a/extension/scheduling/test/schedulingTest.js
++++ b/extension/scheduling/test/schedulingTest.js
+@@ -11,36 +11,48 @@ describeReporting(path.join(__dirname, "../../"), ["html", "templates", "reports
+ 
+     describe('with scheduling extension', function () {
+ 
+-        it('creating schedule should plan it', function (done) {
++        it('creating schedule should add default values', function (done) {
+             this.timeout(3500);
+ 
+-            var requests = [];
+-
+-            reporter.beforeRenderListeners.insert(0, "test", this, function (request, response) {
+-                requests.push(request);
++            var schedule = new reporter.scheduling.ScheduleType({
++                cron: "*/1 * * * * *",
++                templateShortid: "foo"
+             });
+ 
+             reporter.dataProvider.startContext().then(function (context) {
+-                return reporter.templates.create(context, {content: "foo", shortid: "foo"}).then(function () {
+-                    context.schedules.add(new reporter.scheduling.ScheduleType({
+-                        cron: "* * * * * *",
+-                        templateShortid: "foo"
+-                    }));
++                    context.schedules.add(schedule);
+                     return context.saveChanges();
+-                });
+             }).then(function () {
+-                setTimeout(function () {
++                schedule.nextRun.should.be.ok;
++                schedule.creationDate.should.be.ok;
++                schedule.state.should.be.exactly("planned");
++                done();
++            }).fail(done);
++        });
+ 
+-                    requests.length.should.be.exactly(2);
+-                    requests[0].options.scheduling.taskId.should.be.ok;
+-                    requests[0].template.shortid.should.be.exactly("foo");
+ 
+-                    done();
+-                }, 2500);
+-            }).catch(done);
++        it('updating schedule should recalculate nextRun', function (done) {
++            this.timeout(3500);
++
++            var schedule = new reporter.scheduling.ScheduleType({
++                cron: "*/1 * * * * *",
++                templateShortid: "foo"
++            });
++
++            reporter.dataProvider.startContext().then(function (context) {
++                context.schedules.add(schedule);
++                return context.saveChanges().then(function () {
++                    context.schedules.attach(schedule);
++                    schedule.nextRun = new Date(1);
++                    return context.schedules.saveChanges();
++                });
++            }).then(function () {
++                schedule.nextRun.should.not.be.exactly(new Date(1));
++                done();
++            }).fail(done);
+         });
+ 
+-        it('init schedule should plan it', function (done) {
++        it('render process job should render report', function (done) {
+             this.timeout(3500);
+ 
+             var counter = 0;
+@@ -49,23 +61,13 @@ describeReporting(path.join(__dirname, "../../"), ["html", "templates", "reports
+                 counter++;
+             });
+ 
+-            reporter.scheduling.suspendAutoRegistration = true;
+-
+             reporter.dataProvider.startContext().then(function (context) {
+-                return reporter.templates.create(context, {content: "foo", shortid: "foo"}).then(function () {
+-                    context.schedules.add(new reporter.scheduling.ScheduleType({
+-                        cron: "* * * * * *",
+-                        templateShortid: "foo"
+-                    }));
+-                    return context.saveChanges();
++                return reporter.templates.create(context, {content: "foo"}).then(function (template) {
++                    return reporter.scheduling.renderReport({ templateShortid: template.shortid }, context).then(function () {
++                        counter.should.be.exactly(1);
++                        done();
++                    });
+                 });
+-            }).then(function () {
+-                return reporter.scheduling._initialize();
+-            }).then(function () {
+-                setTimeout(function () {
+-                    counter.should.be.exactly(2);
+-                    done();
+-                }, 2500);
+             }).catch(done);
+         });
+     });
+
+From 6546058c0f2b7431a277544805ee1427d42c9c4f Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Thu, 11 Dec 2014 21:09:44 +0100
+Subject: [PATCH] fix split pane resizing
+
+---
+ extension/scheduling/lib/jobProcessor.js      |  4 ++--
+ extension/scheduling/lib/scheduling.js        |  2 +-
+ extension/scheduling/test/jobProcessorTest.js | 10 +++++-----
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/extension/scheduling/lib/jobProcessor.js b/extension/scheduling/lib/jobProcessor.js
+index 059ad402e4ae578c5ecf4ff71186072dc2feec2e..7d0c4623a1061f0fba947f4db4bac9de01ab19b4 100644
+--- a/extension/scheduling/lib/jobProcessor.js
++++ b/extension/scheduling/lib/jobProcessor.js
+@@ -65,7 +65,7 @@ JobProcessor.prototype.process = function (options) {
+     var self = this;
+     options = options || {};
+ 
+-    if (this.currentlyRunningTasks.length >= this.options.maxJobs) {
++    if (this.currentlyRunningTasks.length >= this.options.maxParallelJobs) {
+         return q();
+     }
+ 
+@@ -95,7 +95,7 @@ JobProcessor.prototype.process = function (options) {
+ JobProcessor.prototype.processOne = function (schedule, task, context) {
+     var self = this;
+ 
+-    if (this.currentlyRunningTasks.length >= this.options.maxJobs) {
++    if (this.currentlyRunningTasks.length >= this.options.maxParallelJobs) {
+         return;
+     }
+ 
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index 82a34b5c3ba57d4729f89c8876a3374fbd35eb21..f795f35c4de756534e3fe5c16da0bb1df480f11f 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -121,7 +121,7 @@ module.exports = function (reporter, definition) {
+ 
+     definition.options = _.extend({
+         interval: 5000,
+-        maxJobs: 5
++        maxParallelJobs: 5
+     }, definition.options);
+ 
+     if (!jobProcessor) {
+diff --git a/extension/scheduling/test/jobProcessorTest.js b/extension/scheduling/test/jobProcessorTest.js
+index 83124ea7381c6bb65413d346637a3697e1d1a889..1c696260f4b556780ae1cbe4c22fbde79512b9bc 100644
+--- a/extension/scheduling/test/jobProcessorTest.js
++++ b/extension/scheduling/test/jobProcessorTest.js
+@@ -31,7 +31,7 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+ 
+                     var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
+                         interval: 50,
+-                        maxJobs: 1
++                        maxParallelJobs: 1
+                     });
+                     return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+                         return context.tasks.toArray().then(function (tasks) {
+@@ -45,7 +45,7 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+             }).catch(done);
+         });
+ 
+-        it('should not cross maxJobs', function (done) {
++        it('should not cross maxParallelJobs', function (done) {
+             this.timeout(2000);
+             reporter.scheduling.stop();
+ 
+@@ -65,7 +65,7 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+ 
+                 var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
+                     interval: 50,
+-                    maxJobs: 0
++                    maxParallelJobs: 0
+                 });
+                 return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+                     counter.should.be.exactly(0);
+@@ -100,7 +100,7 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+ 
+                     var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
+                         interval: 20,
+-                        maxJobs: 1,
++                        maxParallelJobs: 1,
+                         taskPingTimeout: 10
+                     });
+ 
+@@ -137,7 +137,7 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+ 
+                         var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
+                             interval: 20,
+-                            maxJobs: 1
++                            maxParallelJobs: 1
+                         });
+                         jobProcessor.currentlyRunningTasks.push(task);
+                         return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+
+From 1e2806c4f0ff177653201dca876542d578587d4b Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Tue, 13 Jan 2015 20:54:35 +0100
+Subject: [PATCH] sharing templates, wrapped recipes
+
+---
+ extension/scheduling/lib/scheduling.js | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index f795f35c4de756534e3fe5c16da0bb1df480f11f..28b0a82c214c553580cc9c247c3170f935b8e923 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -1,7 +1,7 @@
+ ﻿/*! 
+  * Copyright(c) 2014 Jan Blaha 
+  *
+- * Inline Data plugin able to add some sample data to rendering process
++ * Extension capable of planning reoccurring jobs which are printing specified templates into reports.
+  */
+ 
+ var events = require("events"),
+@@ -118,7 +118,6 @@ Scheduling.prototype.renderReport = function (schedule, task, context) {
+ module.exports = function (reporter, definition) {
+     reporter[definition.name] = new Scheduling(reporter, definition);
+ 
+-
+     definition.options = _.extend({
+         interval: 5000,
+         maxParallelJobs: 5
+
+From 1aa2828c56370b6cc1fd7b4207f4cf8bf69078f6 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Mon, 19 Jan 2015 14:19:26 +0100
+Subject: [PATCH] fixing build
+
+---
+ extension/scheduling/lib/jobProcessor.js | 2 +-
+ extension/scheduling/lib/scheduling.js   | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/extension/scheduling/lib/jobProcessor.js b/extension/scheduling/lib/jobProcessor.js
+index 7d0c4623a1061f0fba947f4db4bac9de01ab19b4..5790ebca2480060ad2474136770fdd7d3f7b5a96 100644
+--- a/extension/scheduling/lib/jobProcessor.js
++++ b/extension/scheduling/lib/jobProcessor.js
+@@ -123,7 +123,7 @@ JobProcessor.prototype.execute = function (schedule, task, context) {
+ 
+     return context.saveChanges().then(function () {
+         var cron = new CronTime(schedule.cron);
+-        var nextRun = cron._getNextDateFrom(new Date(schedule.nextRun.getTime() + 1000));
++        var nextRun = cron._getNextDateFrom(new Date(schedule.nextRun.getTime() + 1000)).toDate();
+ 
+         return context.schedules.rawUpdate({
+             _id: schedule._id
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index f795f35c4de756534e3fe5c16da0bb1df480f11f..688e3214d56a80b53a061af7d13ef58a46bca90c 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -73,7 +73,7 @@ Scheduling.prototype._beforeCreateHandler = function (key, items) {
+     entity.modificationDate = new Date();
+     entity.enabled = entity.enabled !== false; //default false
+     var cron = new CronTime(entity.cron);
+-    entity.nextRun = new Date(cron._getNextDateFrom(new Date()));
++    entity.nextRun = cron._getNextDateFrom(new Date()).toDate();
+     return true;
+ };
+ 
+@@ -85,7 +85,7 @@ Scheduling.prototype._beforeUpdateHandler = function (key, items) {
+         return false;
+ 
+     var cron = new CronTime(entity.cron);
+-    entity.nextRun = cron._getNextDateFrom(new Date());
++    entity.nextRun = cron._getNextDateFrom(new Date()).toDate();
+     entity.state = "planned";
+ 
+     return true;
+
+From 786c46cb223cc96a3b4e08183b63aeaea51861c3 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Tue, 20 Jan 2015 15:26:55 +0100
+Subject: [PATCH] users management
+
+---
+ extension/scheduling/lib/scheduling.js             | 1 +
+ extension/scheduling/public/js/main_dev.js         | 6 ++++--
+ extension/scheduling/public/js/scheduling.model.js | 4 ++++
+ 3 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index 28b0a82c214c553580cc9c247c3170f935b8e923..082151adfec5d79678fd1fc78426c9eaa53a55b2 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -107,6 +107,7 @@ Scheduling.prototype.stop = function () {
+ Scheduling.prototype.renderReport = function (schedule, task, context) {
+     return this.reporter.render({
+         template: {shortid: schedule.templateShortid},
++        user : { isAdmin: true},
+         options: {
+             scheduling: {taskId: task._id, scheduleShortid: schedule.shortid},
+             reports: {save: true, mergeProperties: {taskId: task._id}},
+diff --git a/extension/scheduling/public/js/main_dev.js b/extension/scheduling/public/js/main_dev.js
+index 662d5f4475836c77676b9448659895c917614d1d..58dfeb2bb0e43ee0beeb7c24d3b2e733af3455f7 100644
+--- a/extension/scheduling/public/js/main_dev.js
++++ b/extension/scheduling/public/js/main_dev.js
+@@ -49,11 +49,13 @@
+             app.scheduling.router = new Router();
+ 
+             app.on("menu-render", function (context) {
+-                context.result += "<li><a href='/#/extension/scheduling/list'>Scheduling</a></li>";
++                if (!app.settings.tenant || app.settings.tenant.isAdmin)
++                    context.result += "<li><a href='/#/extension/scheduling/list'>Scheduling</a></li>";
+             });
+ 
+             app.on("menu-actions-render", function (context) {
+-                context.result += "<li><a id='createScheduleCommand' href='#/extension/scheduling/detail' class='validate-leaving'>Create Schedule</a></li>";
++                if (!app.settings.tenant || app.settings.tenant.isAdmin)
++                    context.result += "<li><a id='createScheduleCommand' href='#/extension/scheduling/detail' class='validate-leaving'>Create Schedule</a></li>";
+             });
+ 
+             app.on("entity-registration", entityRegistration);
+diff --git a/extension/scheduling/public/js/scheduling.model.js b/extension/scheduling/public/js/scheduling.model.js
+index 81643e2a915fd8f75ae0e8abb221a64d74eee392..96df7d6111bfb061dc417d5f47f57b1c05f04fa1 100644
+--- a/extension/scheduling/public/js/scheduling.model.js
++++ b/extension/scheduling/public/js/scheduling.model.js
+@@ -49,6 +49,10 @@
+             var self = this;
+             this.Entity = $entity.Schedule;
+             this.tasks = new TasksModel();
++        },
++
++        toString: function() {
++            return "Schedule " + (this.get("name") || "");
+         }
+     });
+ });
+\ No newline at end of file
+
+From 6fc33424928312184bd506ec99b7b839c112d131 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Tue, 20 Jan 2015 15:27:53 +0100
+Subject: [PATCH] Merge branch 'master' of
+ https://github.com/jsreport/jsreport
+
+Conflicts:
+	Gruntfile.js
+
+From 3425ab1f06e733541c76a71cb942403f6471dcda Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Sat, 24 Jan 2015 22:37:06 +0100
+Subject: [PATCH] finishing release with user management
+
+---
+ extension/scheduling/public/js/scheduling.detail.view.js | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/extension/scheduling/public/js/scheduling.detail.view.js b/extension/scheduling/public/js/scheduling.detail.view.js
+index 756622b30bb4848c3ce1933ddf869c79d1a59a4d..e30e550390a0ba90a5b68adeecb7959d591dd473 100644
+--- a/extension/scheduling/public/js/scheduling.detail.view.js
++++ b/extension/scheduling/public/js/scheduling.detail.view.js
+@@ -39,7 +39,7 @@
+                         }
+                         var taskId = $(this).attr("data-id");
+                         app.dataContext.reports.single(function(r) { return r.taskId === this.id; }, { id : taskId}).then(function(report) {
+-                            window.open(app.serverUrl + "api/report/" + report._id + "/content", "_blank");
++                            window.open(app.serverUrl + "reports/" + report._id + "/content", "_blank");
+                         });
+                     });
+                 }
+
+From 1d4b5caad830e524c7aaa918035aa634ac2d3b64 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Fri, 30 Jan 2015 20:12:46 +0100
+Subject: [PATCH] fixing bugs found during jsreportonline release
+
+---
+ extension/scheduling/lib/jobProcessor.js |  9 ++-------
+ extension/scheduling/lib/scheduling.js   | 15 +++++++++------
+ 2 files changed, 11 insertions(+), 13 deletions(-)
+
+diff --git a/extension/scheduling/lib/jobProcessor.js b/extension/scheduling/lib/jobProcessor.js
+index 5790ebca2480060ad2474136770fdd7d3f7b5a96..b9db849b7ecaa69fcbda15c137b5fef8c8f8f5e1 100644
+--- a/extension/scheduling/lib/jobProcessor.js
++++ b/extension/scheduling/lib/jobProcessor.js
+@@ -2,7 +2,6 @@ var CronTime = require('cron').CronTime,
+     _ = require("underscore"),
+     q = require("q");
+ 
+-var interval;
+ var JobProcessor = module.exports = function (executionHandler, dataProvider, logger, TaskType, options) {
+ 
+     if (!options.taskPingTimeout)
+@@ -16,18 +15,14 @@ var JobProcessor = module.exports = function (executionHandler, dataProvider, lo
+     this.TaskType = TaskType;
+ 
+     options.now = options.now || function() { return new Date();};
+-
+-    if (interval) {
+-        clearInterval(interval);
+-    }
+ };
+ 
+ JobProcessor.prototype.start = function () {
+-    interval = setInterval(JobProcessor.prototype.process.bind(this), this.options.interval);
++    this.interval = setInterval(JobProcessor.prototype.process.bind(this), this.options.interval);
+ };
+ 
+ JobProcessor.prototype.stop = function () {
+-    clearInterval(interval);
++    clearInterval(this.interval);
+ };
+ 
+ JobProcessor._schedulesToProcessFilter = function (s) {
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index 08ad63639dbf427d4fa9081614cb0ac3326e6ae7..4773b2c429f07c0a6a0f016acb47177abfad6a7a 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -12,8 +12,6 @@ var events = require("events"),
+     CronTime = require('cron').CronTime,
+     JobProcessor = require("./jobProcessor");
+ 
+-var jobProcessor;
+-
+ var Scheduling = function (reporter, definition) {
+     this.reporter = reporter;
+     this.definition = definition;
+@@ -101,7 +99,11 @@ Scheduling.prototype._initialize = function () {
+ };
+ 
+ Scheduling.prototype.stop = function () {
+-    jobProcessor.stop();
++    this.jobProcessor.stop();
++};
++
++Scheduling.prototype.start = function () {
++    this.jobProcessor.start();
+ };
+ 
+ Scheduling.prototype.renderReport = function (schedule, task, context) {
+@@ -124,8 +126,9 @@ module.exports = function (reporter, definition) {
+         maxParallelJobs: 5
+     }, definition.options);
+ 
+-    if (!jobProcessor) {
+-        jobProcessor = new JobProcessor(Scheduling.prototype.renderReport.bind(this), reporter.dataProvider, reporter.logger, reporter[definition.name].TaskType, definition.options);
+-        jobProcessor.start();
++    reporter[definition.name].jobProcessor = new JobProcessor(Scheduling.prototype.renderReport.bind(this), reporter.dataProvider, reporter.logger, reporter[definition.name].TaskType, definition.options);
++
++    if (definition.options.autoStart !== false) {
++        reporter[definition.name].start();
+     }
+ };
+\ No newline at end of file
+
+From 8de2c54ec35470618e47c25bb04212182ef5ab11 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Thu, 26 Mar 2015 17:15:19 +0100
+Subject: [PATCH] merge odata layer
+
+fix #50 #42 #25
+---
+ extension/scheduling/lib/jobProcessor.js           | 103 +++++++-----
+ extension/scheduling/lib/scheduling.js             |  96 +++++------
+ extension/scheduling/public/js/main_dev.js         |   6 +-
+ .../scheduling/public/js/scheduling.detail.view.js |   3 +-
+ .../public/js/scheduling.entityRegistration.js     |  38 -----
+ .../scheduling/public/js/scheduling.list.model.js  |  16 +-
+ extension/scheduling/public/js/scheduling.model.js |  46 +++---
+ .../scheduling/public/js/scheduling.tasks.model.js |  17 +-
+ extension/scheduling/test/jobProcessorTest.js      | 183 +++++++--------------
+ extension/scheduling/test/schedulingTest.js        |  43 ++---
+ 10 files changed, 222 insertions(+), 329 deletions(-)
+
+diff --git a/extension/scheduling/lib/jobProcessor.js b/extension/scheduling/lib/jobProcessor.js
+index b9db849b7ecaa69fcbda15c137b5fef8c8f8f5e1..d3bc25930a608ea413ebc4ef7b08dd179e27e4dd 100644
+--- a/extension/scheduling/lib/jobProcessor.js
++++ b/extension/scheduling/lib/jobProcessor.js
+@@ -2,19 +2,21 @@ var CronTime = require('cron').CronTime,
+     _ = require("underscore"),
+     q = require("q");
+ 
+-var JobProcessor = module.exports = function (executionHandler, dataProvider, logger, TaskType, options) {
++var JobProcessor = module.exports = function (executionHandler, documentStore, logger, TaskType, options) {
+ 
+     if (!options.taskPingTimeout)
+         options.taskPingTimeout = 2 * options.interval;
+ 
+-    this.dataProvider = dataProvider;
++    this.documentStore = documentStore;
+     this.logger = logger;
+     this.options = options;
+     this.executionHandler = executionHandler;
+     this.currentlyRunningTasks = [];
+     this.TaskType = TaskType;
+ 
+-    options.now = options.now || function() { return new Date();};
++    options.now = options.now || function () {
++        return new Date();
++    };
+ };
+ 
+ JobProcessor.prototype.start = function () {
+@@ -25,28 +27,32 @@ JobProcessor.prototype.stop = function () {
+     clearInterval(this.interval);
+ };
+ 
+-JobProcessor._schedulesToProcessFilter = function (s) {
+-    return s.nextRun < this.now && s.state === "planned" && s.enabled === true;
++JobProcessor.prototype._schedulesToProcessFilter = function () {
++    return {
++        $and: [{nextRun: {$lt: this.options.now()}}, {state: "planned"}, {enabled: true}]
++    };
+ };
+ 
+-JobProcessor._tasksToRecoverFilter = function (s) {
+-    return s.ping < this.treshold && s.state === "running";
++JobProcessor.prototype._tasksToRecoverFilter = function () {
++    return {
++        $and: [{ping: {$lt: new Date(this.options.now().getTime() - this.options.taskPingTimeout)}}, {state: "running"}]
++    }
+ };
+ 
+-JobProcessor.prototype._pingRunningTasks = function (context) {
++JobProcessor.prototype._pingRunningTasks = function () {
+     var ids = this.currentlyRunningTasks.map(function (t) {
+         return t._id;
+     });
+-    return context.tasks.rawUpdate({id: {$in: ids}}, {$set: {ping: this.options.now()}});
++    return this.documentStore.collection("tasks").update({_id: {$in: ids}}, {$set: {ping: this.options.now()}});
+ };
+ 
+-JobProcessor.prototype._findTasksToRecover = function (context) {
+-    var now = this.options.now();
+-    return context.tasks.filter(JobProcessor._tasksToRecoverFilter, {treshold: new Date(now.getTime() - this.options.taskPingTimeout)}).toArray().then(function (tasks) {
++JobProcessor.prototype._findTasksToRecover = function () {
++    var self = this;
++    return this.documentStore.collection("tasks").find(self._tasksToRecoverFilter()).then(function (tasks) {
+         if (tasks.length === 0)
+             return [];
+ 
+-        return context.schedules.toArray().then(function (schedules) {
++        return self.documentStore.collection("schedules").find({}).then(function (schedules) {
+             tasks.forEach(function (t) {
+                 t.schedule = _.findWhere(schedules, {shortid: t.scheduleShortid});
+             });
+@@ -60,26 +66,25 @@ JobProcessor.prototype.process = function (options) {
+     var self = this;
+     options = options || {};
+ 
+-    if (this.currentlyRunningTasks.length >= this.options.maxParallelJobs) {
+-        return q();
+-    }
++    return this._pingRunningTasks().then(function () {
++        if (self.currentlyRunningTasks.length >= self.options.maxParallelJobs) {
++            return;
++        }
++
+ 
+-    return this.dataProvider.startContext().then(function (context) {
+-        return self._pingRunningTasks(context).then(function () {
+-            return self._findTasksToRecover(context).then(function (tasks) {
+-                var promise = q.all(tasks.map(function (task) {
+-                    self.logger.info("Recovering task " + task.schedule.name);
+-                    return self.processOne(task.schedule, task, context);
++        return self._findTasksToRecover().then(function (tasks) {
++            var promise = q.all(tasks.map(function (task) {
++                self.logger.info("Recovering task " + task.schedule.name);
++                return self.processOne(task.schedule, task);
++            }));
++            return options.waitForJobToFinish ? promise : q();
++        }).then(function () {
++            return self.documentStore.collection("schedules").find(self._schedulesToProcessFilter()).then(function (schedules) {
++                var promise = q.all(schedules.map(function (s) {
++                    return self.processOne(s, null);
+                 }));
+-                return options.waitForJobToFinish ? promise : q();
+-            }).then(function () {
+-                return context.schedules.filter(JobProcessor._schedulesToProcessFilter, {now: self.options.now()}).toArray().then(function (schedules) {
+-                    var promise = q.all(schedules.map(function (s) {
+-                        return self.processOne(s, null, context);
+-                    }));
+ 
+-                    return options.waitForJobToFinish ? promise : q();
+-                });
++                return options.waitForJobToFinish ? promise : q();
+             });
+         });
+     }).catch(function (e) {
+@@ -87,19 +92,19 @@ JobProcessor.prototype.process = function (options) {
+     });
+ };
+ 
+-JobProcessor.prototype.processOne = function (schedule, task, context) {
++JobProcessor.prototype.processOne = function (schedule, task) {
+     var self = this;
+ 
+     if (this.currentlyRunningTasks.length >= this.options.maxParallelJobs) {
+         return;
+     }
+ 
+-    return context.schedules.rawUpdate({
++    return this.documentStore.collection("schedules").update({
+         _id: schedule._id,
+         state: "planned"
+     }, {$set: {state: "planning"}}).then(function (count) {
+         if (count === 1) {
+-            return self.execute(schedule, task, context);
++            return self.execute(schedule, task);
+         }
+     }).catch(function (e) {
+         self.logger.error("unable to update schedule state" + e.stack);
+@@ -109,24 +114,32 @@ JobProcessor.prototype.processOne = function (schedule, task, context) {
+ JobProcessor.prototype.execute = function (schedule, task, context) {
+     var self = this;
+ 
+-    if (!task) {
+-        task = new (this.TaskType)({creationDate: this.options.now(), scheduleShortid: schedule.shortid, state: "running", ping: this.options.now()});
+-        context.tasks.add(task);
++    function insertTaskIfNotExists() {
++        if (!task) {
++            task = {
++                creationDate: self.options.now(),
++                scheduleShortid: schedule.shortid,
++                state: "running",
++                ping: self.options.now()
++            };
++            self.currentlyRunningTasks.push(task);
++            return self.documentStore.collection("tasks").insert(task);
++        }
++        self.currentlyRunningTasks.push(task);
++        return q();
+     }
+ 
+-    this.currentlyRunningTasks.push(task);
+-
+-    return context.saveChanges().then(function () {
++    return insertTaskIfNotExists().then(function () {
+         var cron = new CronTime(schedule.cron);
+         var nextRun = cron._getNextDateFrom(new Date(schedule.nextRun.getTime() + 1000)).toDate();
+ 
+-        return context.schedules.rawUpdate({
++        return self.documentStore.collection("schedules").update({
+             _id: schedule._id
+         }, {$set: {state: "planned", nextRun: new Date(nextRun.getTime())}});
+-    }).then(function() {
++    }).then(function () {
+         return self.executionHandler(schedule, task, context).then(function () {
+             self.logger.debug("Processing schedule " + schedule.name + " succeeded.");
+-            return context.tasks.rawUpdate(
++            return self.documentStore.collection("tasks").update(
+                 {_id: task._id},
+                 {
+                     $set: {
+@@ -136,7 +149,7 @@ JobProcessor.prototype.execute = function (schedule, task, context) {
+                 });
+         }).catch(function (e) {
+             self.logger.debug("Processing schedule " + schedule.name + " failed with :" + e.stack);
+-            return context.tasks.rawUpdate(
++            return self.documentStore.collection("tasks").update(
+                 {_id: task._id},
+                 {
+                     $set: {
+@@ -146,8 +159,8 @@ JobProcessor.prototype.execute = function (schedule, task, context) {
+                     }
+                 });
+         }).fin(function () {
+-            self.currentlyRunningTasks = _.filter(self.currentlyRunningTasks, function (task) {
+-                return task._id !== task._id;
++            self.currentlyRunningTasks = _.filter(self.currentlyRunningTasks, function (t) {
++                return t._id !== task._id;
+             });
+         });
+     });
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index 4773b2c429f07c0a6a0f016acb47177abfad6a7a..110bc5af4a750404e68c3462b45c5ec90d090e91 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -16,55 +16,44 @@ var Scheduling = function (reporter, definition) {
+     this.reporter = reporter;
+     this.definition = definition;
+ 
+-    this.ScheduleType = this.reporter.dataProvider.createEntityType("ScheduleType", {
+-        _id: {type: "id", key: true, computed: true, nullable: false},
+-        cron: {type: "string"},
+-        name: {type: "string"},
+-        templateShortid: {type: "string"},
+-        creationDate: {type: "date"},
+-        nextRun: {type: "date"},
+-        shortid: {type: "string"},
+-        enabled: {type: "bool"},
+-        modificationDate: {type: "date"},
+-        state: {type: "string"}
++    this.ScheduleType = this.reporter.documentStore.registerEntityType("ScheduleType", {
++        _id: {type: "Edm.String", key: true},
++        cron: {type: "Edm.String"},
++        name: {type: "Edm.String"},
++        templateShortid: {type: "Edm.String"},
++        creationDate: {type: "Edm.DateTimeOffset"},
++        nextRun: {type: "Edm.DateTimeOffset"},
++        shortid: {type: "Edm.String"},
++        enabled: {type: "Edm.Boolean"},
++        modificationDate: {type: "Edm.DateTimeOffset"},
++        state: {type: "Edm.String"}
+     });
+ 
+-    this.TaskType = this.reporter.dataProvider.createEntityType("TaskType", {
+-        _id: {type: "id", key: true, computed: true, nullable: false},
+-        scheduleShortid: {type: "string"},
+-        creationDate: {type: "date"},
+-        finishDate: {type: "date"},
+-        state: {type: "string"},
+-        error: {type: "string"},
+-        ping: {type: "date"}
++    this.TaskType = this.reporter.documentStore.registerEntityType("TaskType", {
++        _id: {type: "Edm.String", key: true},
++        scheduleShortid: {type: "Edm.String"},
++        creationDate: {type: "Edm.DateTimeOffset"},
++        finishDate: {type: "Edm.DateTimeOffset"},
++        state: {type: "Edm.String"},
++        error: {type: "Edm.String"},
++        ping: {type: "Edm.DateTimeOffset"}
+     });
+ 
+-    var schedulesSet = this.reporter.dataProvider.registerEntitySet("schedules", this.ScheduleType, {tableOptions: {humanReadableKeys: ["shortid"]}});
+-    schedulesSet.beforeCreateListeners.add("schedule-before-create", Scheduling.prototype._beforeCreateHandler.bind(this));
+-    schedulesSet.beforeUpdateListeners.add("schedule-before-update", Scheduling.prototype._beforeUpdateHandler.bind(this));
+-    schedulesSet.beforeDeleteListeners.add("schedule-before-delete", Scheduling.prototype._beforeDeleteHandler.bind(this));
+-    schedulesSet.afterReadListeners.add("schedule-after-read", Scheduling.prototype._afterReadHandler.bind(this));
+-
+-    this.reporter.dataProvider.registerEntitySet("tasks", this.TaskType, {tableOptions: {nedbPersistance: "singleFile"}});
+-
+-    this.reporter.reports.ReportType.addMember("taskId", {type: "id"});
+ 
++    this.reporter.documentStore.registerEntitySet("schedules", {entityType: "ScheduleType", humanReadableKey: "shortid"});
++    this.reporter.documentStore.model.entityTypes["ReportType"].taskId = { type: "Edm.String"};
++    this.reporter.documentStore.registerEntitySet("tasks", {entityType: "TaskType"});
+     reporter.initializeListener.add(definition.name, this, Scheduling.prototype._initialize);
+ };
+ 
+ util.inherits(Scheduling, events.EventEmitter);
+ 
+-Scheduling.prototype._afterReadHandler = function (key, successResult, sets, query) {
+-    return true;
+-};
+-
+-Scheduling.prototype._beforeCreateHandler = function (key, items) {
+-    var entity = items[0];
++Scheduling.prototype._beforeCreateHandler = function (entity) {
+     if (!entity.shortid)
+         entity.shortid = shortid.generate();
+ 
+     if (!entity.cron)
+-        return false;
++        throw new Error("cron expression must be set.");
+ 
+     entity.state = "planned";
+     entity.creationDate = new Date();
+@@ -72,30 +61,28 @@ Scheduling.prototype._beforeCreateHandler = function (key, items) {
+     entity.enabled = entity.enabled !== false; //default false
+     var cron = new CronTime(entity.cron);
+     entity.nextRun = cron._getNextDateFrom(new Date()).toDate();
+-    return true;
+ };
+ 
+-Scheduling.prototype._beforeUpdateHandler = function (key, items) {
+-    var entity = items[0];
+-    entity.modificationDate = new Date();
++Scheduling.prototype._beforeUpdateHandler = function (query, update) {
++    var entity = update.$set;
+ 
+-    if (!entity.cron)
+-        return false;
++    if (entity.name)
++        entity.modificationDate = new Date();
+ 
+-    var cron = new CronTime(entity.cron);
+-    entity.nextRun = cron._getNextDateFrom(new Date()).toDate();
+-    entity.state = "planned";
+-
+-    return true;
+-};
+-
+-Scheduling.prototype._beforeDeleteHandler = function (key, items) {
+-    var entity = items[0];
+-    return true;
++    if (entity.cron) {
++        entity.modificationDate = new Date();
++        var cron = new CronTime(entity.cron);
++        entity.nextRun = cron._getNextDateFrom(new Date()).toDate();
++        entity.state = "planned";
++    }
+ };
+ 
+ Scheduling.prototype._initialize = function () {
+     var self = this;
++
++    this.schedulesCollection = this.reporter.documentStore.collection("schedules");
++    this.schedulesCollection.beforeInsertListeners.add("schedule", Scheduling.prototype._beforeCreateHandler.bind(this));
++    this.schedulesCollection.beforeUpdateListeners.add("schedule", Scheduling.prototype._beforeUpdateHandler.bind(this));
+ };
+ 
+ Scheduling.prototype.stop = function () {
+@@ -106,7 +93,7 @@ Scheduling.prototype.start = function () {
+     this.jobProcessor.start();
+ };
+ 
+-Scheduling.prototype.renderReport = function (schedule, task, context) {
++Scheduling.prototype.renderReport = function (schedule, task) {
+     return this.reporter.render({
+         template: {shortid: schedule.templateShortid},
+         user : { isAdmin: true},
+@@ -119,6 +106,9 @@ Scheduling.prototype.renderReport = function (schedule, task, context) {
+ };
+ 
+ module.exports = function (reporter, definition) {
++    if (definition.options.enabled === false)
++        return;
++
+     reporter[definition.name] = new Scheduling(reporter, definition);
+ 
+     definition.options = _.extend({
+@@ -126,7 +116,7 @@ module.exports = function (reporter, definition) {
+         maxParallelJobs: 5
+     }, definition.options);
+ 
+-    reporter[definition.name].jobProcessor = new JobProcessor(Scheduling.prototype.renderReport.bind(this), reporter.dataProvider, reporter.logger, reporter[definition.name].TaskType, definition.options);
++    reporter[definition.name].jobProcessor = new JobProcessor(Scheduling.prototype.renderReport.bind(this), reporter.documentStore, reporter.logger, reporter[definition.name].TaskType, definition.options);
+ 
+     if (definition.options.autoStart !== false) {
+         reporter[definition.name].start();
+diff --git a/extension/scheduling/public/js/main_dev.js b/extension/scheduling/public/js/main_dev.js
+index 58dfeb2bb0e43ee0beeb7c24d3b2e733af3455f7..b45124d37a8fb54ec6b1d51ae10bfa6cf28abd2c 100644
+--- a/extension/scheduling/public/js/main_dev.js
++++ b/extension/scheduling/public/js/main_dev.js
+@@ -1,9 +1,9 @@
+ ﻿define(["app", "marionette", "backbone",
+         "./scheduling.list.model", "./scheduling.list.view", "./scheduling.list.toolbar.view",
+         "./scheduling.model", "./scheduling.detail.view",
+-        "./scheduling.toolbar.view", "./scheduling.entityRegistration"],
++        "./scheduling.toolbar.view"],
+     function (app, Marionette, Backbone, ListModel, ListView, ListToolbarView, Model, DetailView,
+-              ToolbarView, entityRegistration) {
++              ToolbarView) {
+ 
+         app.module("scheduling", function (module) {
+             var Router = Backbone.Router.extend({
+@@ -57,7 +57,5 @@
+                 if (!app.settings.tenant || app.settings.tenant.isAdmin)
+                     context.result += "<li><a id='createScheduleCommand' href='#/extension/scheduling/detail' class='validate-leaving'>Create Schedule</a></li>";
+             });
+-
+-            app.on("entity-registration", entityRegistration);
+         });
+     });
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/scheduling.detail.view.js b/extension/scheduling/public/js/scheduling.detail.view.js
+index e30e550390a0ba90a5b68adeecb7959d591dd473..0d286a9cf3830b050e4390e84df1102068b585f6 100644
+--- a/extension/scheduling/public/js/scheduling.detail.view.js
++++ b/extension/scheduling/public/js/scheduling.detail.view.js
+@@ -38,7 +38,8 @@
+                             return;
+                         }
+                         var taskId = $(this).attr("data-id");
+-                        app.dataContext.reports.single(function(r) { return r.taskId === this.id; }, { id : taskId}).then(function(report) {
++                        app.dataProvider.get("odata/reports?$filter=taskId eq '" + taskId + "'").then(function(reports) {
++                            var report = reports[0];
+                             window.open(app.serverUrl + "reports/" + report._id + "/content", "_blank");
+                         });
+                     });
+diff --git a/extension/scheduling/public/js/scheduling.entityRegistration.js b/extension/scheduling/public/js/scheduling.entityRegistration.js
+deleted file mode 100644
+index 7c8f7773a133803d9c9b3275beed96cf48e6d31f..0000000000000000000000000000000000000000
+--- a/extension/scheduling/public/js/scheduling.entityRegistration.js
++++ /dev/null
+@@ -1,38 +0,0 @@
+-define([], function() {
+-    return function(context) {
+-
+-        $data.Class.define("$entity.Schedule", $data.Entity, null, {
+-            _id: { 'key': true, 'nullable': false, 'computed': true, 'type': 'Edm.String' },
+-            cron: {type: "string"},
+-            name: {type: "string"},
+-            templateShortid: {type: "string"},
+-            creationDate: {type: "date"},
+-            nextRun: {type: "date"},
+-            enabled: {type: "boolean"},
+-            shortid: {type: "string"},
+-            modificationDate: {type: "date"}
+-        }, null);
+-
+-        $entity.Schedule.prototype.toString = function () {
+-            return "Schedule " + (this.name || "");
+-        };
+-
+-        $data.Class.define("$entity.Task", $data.Entity, null, {
+-            _id: { 'key': true, 'nullable': false, 'computed': true, 'type': 'Edm.String' },
+-            scheduleShortid: {type: "string"},
+-            creationDate: {type: "date"},
+-            finishDate: {type: "date"},
+-            state: {type: "string"},
+-            error: {type: "string"},
+-            ping: {type: "date"}
+-        });
+-
+-        $entity.Task.prototype.toString = function () {
+-            return "Task";
+-        };
+-
+-        $entity.Report.addMember("taskId", { type: "string" });
+-        context["schedules"] = { type: $data.EntitySet, elementType: $entity.Schedule };
+-        context["tasks"] = { type: $data.EntitySet, elementType: $entity.Task };
+-    };
+-});
+\ No newline at end of file
+diff --git a/extension/scheduling/public/js/scheduling.list.model.js b/extension/scheduling/public/js/scheduling.list.model.js
+index 2485339ea08c1b637055c48668f2e0b3b2bcec49..e557baccd6c2d5699213a0a257ed385ed94af990 100644
+--- a/extension/scheduling/public/js/scheduling.list.model.js
++++ b/extension/scheduling/public/js/scheduling.list.model.js
+@@ -1,6 +1,12 @@
+ ﻿define(["app", "backbone", "core/dataGrid", "./scheduling.model"], function (app, Backbone, DataGrid, DataModel) {
+     return Backbone.Collection.extend({
+ 
++        url: function () {
++            var qs = this.filter.toOData();
++            qs.$orderby = "modificationDate desc";
++            return "odata/schedules?" + $.param(qs);
++        },
++
+         initialize: function () {
+             var self = this;
+             this.filter = new DataGrid.Filter.Base();
+@@ -8,17 +14,13 @@
+                 self.fetch();
+             });
+         },
+-        
++
+         parse: function (data) {
+-            if (data.totalCount != null)
+-                this.filter.set("totalCount", data.totalCount);
++            if (this.meta && this.meta["@odata.count"])
++                this.filter.set("totalCount", this.meta["@odata.count"]);
+ 
+             return data;
+         },
+-        
+-        fetchQuery: function () {
+-            return app.dataContext.schedules.applyFilter(this.filter).toArray();
+-        },
+ 
+         model: DataModel
+     });
+diff --git a/extension/scheduling/public/js/scheduling.model.js b/extension/scheduling/public/js/scheduling.model.js
+index 96df7d6111bfb061dc417d5f47f57b1c05f04fa1..dfbf64f225c22a3c16922db84506ebdd084736cd 100644
+--- a/extension/scheduling/public/js/scheduling.model.js
++++ b/extension/scheduling/public/js/scheduling.model.js
+@@ -1,9 +1,6 @@
+-﻿define(["app", "core/jaydataModel", "underscore", "./scheduling.tasks.model"], function (app, ModelBase, _, TasksModel) {
++﻿define(["app", "core/basicModel", "underscore", "./scheduling.tasks.model"], function (app, ModelBase, _, TasksModel) {
+ 
+     return ModelBase.extend({
+-        contextSet: function () {
+-            return app.dataContext.schedules;
+-        },
+ 
+         fetch: function (options) {
+             var self = this;
+@@ -11,26 +8,27 @@
+             this.tasks.scheduleShortid = self.get("shortid");
+ 
+             function fetchSchedule(options) {
+-                    app.dataContext.templates.map(function(t) { return { shortid: t.shortid, name: t.name }; }).toArray().then(function (templates) {
+-                        self.templates = templates;
+-                        self.templates.unshift({ name: "-- select template --"});
+-                        if (self.get("shortid")) {
+-                            return app.dataContext.schedules.single(function (r) {
+-                                return r.shortid === this.id;
+-                            }, {id: self.get("shortid")}).then(function (schedule) {
+-                                self.set(schedule.initData);
+-                                self.set("templateName", _.findWhere(templates, {shortid: schedule.templateShortid}).name);
+-                                options.success();
+-                            });
+-                        } else {
+-                            self.set("templateName", "-- select template --");
++                app.dataProvider.get("odata/templates").then(function (templates) {
++                    self.templates = templates.map(function (t) {
++                        return {shortid: t.shortid, name: t.name};
++                    })
++                    self.templates.unshift({name: "-- select template --"});
++                    if (self.get("shortid")) {
++                        return app.dataProvider.get("odata/schedules?$filter=shortid eq " + self.get("shortid")).then(function (schedules) {
++                            var schedule = schedules[0];
++                            self.set(schedule);
++                            self.set("templateName", _.findWhere(templates, {shortid: schedule.templateShortid}).name);
+                             options.success();
+-                        }
+-                    });
++                        });
++                    } else {
++                        self.set("templateName", "-- select template --");
++                        options.success();
++                    }
++                });
+             }
+ 
+             fetchSchedule({
+-                success: function() {
++                success: function () {
+                     self.trigger("sync");
+                     if (self.tasks.scheduleShortid) {
+                         self.tasks.fetch(options);
+@@ -41,17 +39,17 @@
+             });
+         },
+ 
++        odata: "schedules",
++
+         defaults: {
+             enabled: true
+         },
+ 
+-        _initialize: function () {
+-            var self = this;
+-            this.Entity = $entity.Schedule;
++        initialize: function () {
+             this.tasks = new TasksModel();
+         },
+ 
+-        toString: function() {
++        toString: function () {
+             return "Schedule " + (this.get("name") || "");
+         }
+     });
+diff --git a/extension/scheduling/public/js/scheduling.tasks.model.js b/extension/scheduling/public/js/scheduling.tasks.model.js
+index 800d0394253946391e4631d964cb8cbd150fb187..4eaf270c99f50a989e4bbf36e0ed1d4928535549 100644
+--- a/extension/scheduling/public/js/scheduling.tasks.model.js
++++ b/extension/scheduling/public/js/scheduling.tasks.model.js
+@@ -13,19 +13,18 @@ define(["app", "backbone", "core/dataGrid"], function (app, Backbone, DataGrid)
+         },
+ 
+         parse: function (data) {
+-            if (data.totalCount != null)
+-                this.filter.set("totalCount", data.totalCount);
++            if (this.meta && this.meta["@odata.count"])
++                this.filter.set("totalCount", this.meta["@odata.count"]);
+ 
+             return data;
+         },
+ 
+-        fetchQuery: function () {
+-            return app.dataContext.tasks
+-                .filter(function(t) { return t.scheduleShortid === this.scheduleShortid; }, { scheduleShortid : this.scheduleShortid})
+-                .orderByDescending(function(t) {
+-                    return t.finishDate;
+-                })
+-                .applyFilter(this.filter).toArray();
++        url: function () {
++            var qs = this.filter.toOData();
++            qs.$orderby = "finishDate desc";
++            qs.$filter = "scheduleShortid eq " + this.scheduleShortid;
++
++            return "odata/tasks?" + $.param(qs);
+         },
+ 
+         model: Model
+diff --git a/extension/scheduling/test/jobProcessorTest.js b/extension/scheduling/test/jobProcessorTest.js
+index 1c696260f4b556780ae1cbe4c22fbde79512b9bc..6a3511043ed88f51504781d1d34ad607d97bbe0e 100644
+--- a/extension/scheduling/test/jobProcessorTest.js
++++ b/extension/scheduling/test/jobProcessorTest.js
+@@ -17,29 +17,26 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+             this.timeout(3000);
+             reporter.scheduling.stop();
+ 
+-            reporter.dataProvider.startContext().then(function (context) {
+-                context.schedules.add(new reporter.scheduling.ScheduleType({
+-                    cron: "*/1 * * * * *"
+-                }));
+-                return context.saveChanges().then(function () {
+-                    var counter = 0;
++            reporter.documentStore.collection("schedules").insert({
++                cron: "*/1 * * * * *"
++            }).then(function () {
++                var counter = 0;
+ 
+-                    function exec() {
+-                        counter++;
+-                        return q();
+-                    }
++                function exec() {
++                    counter++;
++                    return q();
++                }
+ 
+-                    var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
+-                        interval: 50,
+-                        maxParallelJobs: 1
+-                    });
+-                    return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+-                        return context.tasks.toArray().then(function (tasks) {
+-                            tasks.length.should.be.exactly(1);
+-                            tasks[0].state.should.be.exactly("success");
+-                            tasks[0].finishDate.should.be.ok;
+-                            done();
+-                        });
++                var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
++                    interval: 50,
++                    maxParallelJobs: 1
++                });
++                return jobProcessor.process({waitForJobToFinish: true}).then(function () {
++                    return reporter.documentStore.collection("tasks").find({}).then(function (tasks) {
++                        tasks.length.should.be.exactly(1);
++                        tasks[0].state.should.be.exactly("success");
++                        tasks[0].finishDate.should.be.ok;
++                        done();
+                     });
+                 });
+             }).catch(done);
+@@ -49,11 +46,8 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+             this.timeout(2000);
+             reporter.scheduling.stop();
+ 
+-            reporter.dataProvider.startContext().then(function (context) {
+-                context.schedules.add(new reporter.scheduling.ScheduleType({
+-                    cron: "*/1 * * * * *"
+-                }));
+-                return context.saveChanges();
++            reporter.documentStore.collection("schedules").insert({
++                cron: "*/1 * * * * *"
+             }).then(function () {
+ 
+                 var counter = 0;
+@@ -63,7 +57,7 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+                     return q();
+                 }
+ 
+-                var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
++                var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
+                     interval: 50,
+                     maxParallelJobs: 0
+                 });
+@@ -77,37 +71,31 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+         it('should recover failed tasks', function (done) {
+             reporter.scheduling.stop();
+ 
+-            reporter.dataProvider.startContext().then(function (context) {
+-                var schedule = new reporter.scheduling.ScheduleType({
+-                    cron: "* * * * * 2090"
++            reporter.documentStore.collection("schedules").insert({
++                cron: "* * * * * 2090"
++            }).then(function (schedule) {
++                reporter.documentStore.collection("tasks").insert({
++                    ping: new Date(1),
++                    state: "running",
++                    scheduleShortid: schedule.shortid
+                 });
++            }).then(function () {
++                var counter = 0;
+ 
+-                context.schedules.add(schedule);
+-                return context.saveChanges().then(function () {
+-                    context.tasks.add(new reporter.scheduling.TaskType({
+-                        ping: new Date(1),
+-                        state: "running",
+-                        scheduleShortid: schedule.shortid
+-                    }));
+-                    return context.saveChanges();
+-                }).then(function () {
+-                    var counter = 0;
+-
+-                    function exec() {
+-                        counter++;
+-                        return q();
+-                    }
++                function exec() {
++                    counter++;
++                    return q();
++                }
+ 
+-                    var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
+-                        interval: 20,
+-                        maxParallelJobs: 1,
+-                        taskPingTimeout: 10
+-                    });
++                var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
++                    interval: 20,
++                    maxParallelJobs: 1,
++                    taskPingTimeout: 10
++                });
+ 
+-                    return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+-                        counter.should.be.exactly(1);
+-                        done();
+-                    });
++                return jobProcessor.process({waitForJobToFinish: true}).then(function () {
++                    counter.should.be.exactly(1);
++                    done();
+                 });
+             }).catch(done);
+         });
+@@ -115,36 +103,30 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+         it('should ping running tasks', function (done) {
+             reporter.scheduling.stop();
+ 
+-            reporter.dataProvider.startContext().then(function (context) {
+-                var schedule = new reporter.scheduling.ScheduleType({
+-                    cron: "* * * * * 2090"
+-                });
++            reporter.documentStore.collection("schedules").insert({
++                cron: "* * * * * 2090"
++            }).then(function (schedule) {
++                return reporter.documentStore.collection("tasks").insert({
++                    ping: new Date(new Date().getTime() - 1000),
++                    state: "running",
++                    scheduleShortid: schedule.shortid
++                }).then(function (task) {
+ 
+-                context.schedules.add(schedule);
+-                return context.saveChanges().then(function () {
+-                    var task = new reporter.scheduling.TaskType({
+-                        ping: new Date(new Date().getTime() - 1000),
+-                        state: "running",
+-                        scheduleShortid: schedule.shortid
+-                    });
+-                    context.tasks.add(task);
+-                    return context.saveChanges().then(function () {
+-                        var counter = 0;
++                    var counter = 0;
+ 
+-                        function exec() {
+-                            return q();
+-                        }
++                    function exec() {
++                        return q();
++                    }
+ 
+-                        var jobProcessor = new JobProcessor(exec, reporter.dataProvider, reporter.logger, reporter.scheduling.TaskType, {
+-                            interval: 20,
+-                            maxParallelJobs: 1
+-                        });
+-                        jobProcessor.currentlyRunningTasks.push(task);
+-                        return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+-                            return context.tasks.toArray().then(function (tasks) {
+-                                tasks[0].ping.should.not.be.exactly(task.ping);
+-                                done();
+-                            });
++                    var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
++                        interval: 20,
++                        maxParallelJobs: 1
++                    });
++                    jobProcessor.currentlyRunningTasks.push(task);
++                    return jobProcessor.process({waitForJobToFinish: true}).then(function () {
++                        return reporter.documentStore.collection("tasks").find({}).then(function (tasks) {
++                            tasks[0].ping.should.not.be.exactly(task.ping);
++                            done();
+                         });
+                     });
+                 });
+@@ -153,42 +135,3 @@ describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "sche
+     });
+ });
+ 
+-describe("JobProcessor._schedulesToProcessFilter", function () {
+-    it('should pass for planned in past and enabled', function () {
+-        this.now = new Date();
+-        JobProcessor._schedulesToProcessFilter.call(this, {
+-            enabled: true,
+-            nextRun: new Date(1),
+-            state: "planned"
+-        }).should.be.ok;
+-    });
+-
+-    it('should skip disabled', function () {
+-        this.now = new Date();
+-        JobProcessor._schedulesToProcessFilter.call(this, {
+-            enabled: false,
+-            nextRun: new Date(1),
+-            state: "planned"
+-        }).should.not.be.ok;
+-    });
+-
+-    it('should skip running', function () {
+-        this.now = new Date();
+-        JobProcessor._schedulesToProcessFilter.call(this, {
+-            enabled: true,
+-            nextRun: new Date(1),
+-            state: "running"
+-        }).should.not.be.ok;
+-    });
+-
+-    it('should skip in future', function () {
+-        this.now = new Date();
+-        JobProcessor._schedulesToProcessFilter.call(this, {
+-            enabled: true,
+-            nextRun: new Date(2090, 1, 1),
+-            state: "running"
+-        }).should.not.be.ok;
+-    });
+-});
+-
+-
+diff --git a/extension/scheduling/test/schedulingTest.js b/extension/scheduling/test/schedulingTest.js
+index e6aaf9eba62ebb2212e194e881f7e2d0db050d44..3177a8a41ca48264271592ce9fbadb7754e40ea7 100644
+--- a/extension/scheduling/test/schedulingTest.js
++++ b/extension/scheduling/test/schedulingTest.js
+@@ -12,48 +12,35 @@ describeReporting(path.join(__dirname, "../../"), ["html", "templates", "reports
+     describe('with scheduling extension', function () {
+ 
+         it('creating schedule should add default values', function (done) {
+-            this.timeout(3500);
+ 
+-            var schedule = new reporter.scheduling.ScheduleType({
++            reporter.documentStore.collection("schedules").insert({
+                 cron: "*/1 * * * * *",
+                 templateShortid: "foo"
+-            });
+-
+-            reporter.dataProvider.startContext().then(function (context) {
+-                    context.schedules.add(schedule);
+-                    return context.saveChanges();
+-            }).then(function () {
++            }).then(function (schedule) {
+                 schedule.nextRun.should.be.ok;
+                 schedule.creationDate.should.be.ok;
+                 schedule.state.should.be.exactly("planned");
+                 done();
+-            }).fail(done);
++            }).catch(done);
+         });
+ 
+-
+         it('updating schedule should recalculate nextRun', function (done) {
+-            this.timeout(3500);
+ 
+-            var schedule = new reporter.scheduling.ScheduleType({
++            reporter.documentStore.collection("schedules").insert({
+                 cron: "*/1 * * * * *",
+                 templateShortid: "foo"
+-            });
+-
+-            reporter.dataProvider.startContext().then(function (context) {
+-                context.schedules.add(schedule);
+-                return context.saveChanges().then(function () {
+-                    context.schedules.attach(schedule);
+-                    schedule.nextRun = new Date(1);
+-                    return context.schedules.saveChanges();
++            }).then(function(schedule) {
++                return reporter.documentStore.collection("schedules").update({ shortid: schedule.shortid }, { $set: { cron: "*/1 * * * * *", nextRun: null }});
++            }).then(function() {
++                return reporter.documentStore.collection("schedules").find({}).then(function(schedules) {
++                    schedules[0].nextRun.should.be.ok;
++                    done();
+                 });
+-            }).then(function () {
+-                schedule.nextRun.should.not.be.exactly(new Date(1));
+-                done();
+-            }).fail(done);
++            }).catch(done);
+         });
+ 
+         it('render process job should render report', function (done) {
+-            this.timeout(3500);
++            reporter.scheduling.stop();
+ 
+             var counter = 0;
+ 
+@@ -61,9 +48,9 @@ describeReporting(path.join(__dirname, "../../"), ["html", "templates", "reports
+                 counter++;
+             });
+ 
+-            reporter.dataProvider.startContext().then(function (context) {
+-                return reporter.templates.create(context, {content: "foo"}).then(function (template) {
+-                    return reporter.scheduling.renderReport({ templateShortid: template.shortid }, context).then(function () {
++            reporter.documentStore.collection("templates").insert({ content: "foo", recipe: "html" }).then(function(template) {
++                return reporter.documentStore.collection("tasks").insert({ }).then(function(task) {
++                    return reporter.scheduling.renderReport({templateShortid: template.shortid}, task).then(function () {
+                         counter.should.be.exactly(1);
+                         done();
+                     });
+
+From be456c7aaae047c3bbdce01de376bc091ea53e10 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Sun, 29 Mar 2015 15:11:11 +0200
+Subject: [PATCH] fixing last bugs for release 0.3
+
+---
+ extension/scheduling/lib/scheduling.js                   | 4 ++--
+ extension/scheduling/public/js/scheduling.detail.view.js | 1 +
+ extension/scheduling/public/js/scheduling.model.js       | 2 +-
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index 110bc5af4a750404e68c3462b45c5ec90d090e91..71aec6d13a23620f0a83a7cc92714b1d9fa4fc47 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -40,9 +40,9 @@ var Scheduling = function (reporter, definition) {
+     });
+ 
+ 
+-    this.reporter.documentStore.registerEntitySet("schedules", {entityType: "ScheduleType", humanReadableKey: "shortid"});
++    this.reporter.documentStore.registerEntitySet("schedules", {entityType: "jsreport.ScheduleType", humanReadableKey: "shortid"});
+     this.reporter.documentStore.model.entityTypes["ReportType"].taskId = { type: "Edm.String"};
+-    this.reporter.documentStore.registerEntitySet("tasks", {entityType: "TaskType"});
++    this.reporter.documentStore.registerEntitySet("tasks", {entityType: "jsreport.TaskType"});
+     reporter.initializeListener.add(definition.name, this, Scheduling.prototype._initialize);
+ };
+ 
+diff --git a/extension/scheduling/public/js/scheduling.detail.view.js b/extension/scheduling/public/js/scheduling.detail.view.js
+index 0d286a9cf3830b050e4390e84df1102068b585f6..1eddf73f0f7ff881a60e9c13654ad931adb1acf7 100644
+--- a/extension/scheduling/public/js/scheduling.detail.view.js
++++ b/extension/scheduling/public/js/scheduling.detail.view.js
+@@ -26,6 +26,7 @@
+                 headerTemplate: "scheduling-tasks-header",
+                 rowsTemplate: "scheduling-tasks-rows",
+                 showSelection: false,
++                showSearch: false,
+                 onRender: function() {
+                     self.$el.find(".reportDownload").click(function() {
+                         if ($(this).attr("data-error")) {
+diff --git a/extension/scheduling/public/js/scheduling.model.js b/extension/scheduling/public/js/scheduling.model.js
+index dfbf64f225c22a3c16922db84506ebdd084736cd..9b0d81bd4f3b760cd5d78eac1d3ded69c94aa720 100644
+--- a/extension/scheduling/public/js/scheduling.model.js
++++ b/extension/scheduling/public/js/scheduling.model.js
+@@ -11,7 +11,7 @@
+                 app.dataProvider.get("odata/templates").then(function (templates) {
+                     self.templates = templates.map(function (t) {
+                         return {shortid: t.shortid, name: t.name};
+-                    })
++                    });
+                     self.templates.unshift({name: "-- select template --"});
+                     if (self.get("shortid")) {
+                         return app.dataProvider.get("odata/schedules?$filter=shortid eq " + self.get("shortid")).then(function (schedules) {
+
+From 8b83b6a45522638dd16a129dd0d5a3d4e79030ff Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Mon, 30 Mar 2015 16:05:54 +0200
+Subject: [PATCH] change isRootRequest into isChildRequest
+
+---
+ extension/scheduling/lib/scheduling.js | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index 71aec6d13a23620f0a83a7cc92714b1d9fa4fc47..c6460bb2ff4a4a55bd07f1a3d475f787874dc69d 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -99,8 +99,7 @@ Scheduling.prototype.renderReport = function (schedule, task) {
+         user : { isAdmin: true},
+         options: {
+             scheduling: {taskId: task._id, scheduleShortid: schedule.shortid},
+-            reports: {save: true, mergeProperties: {taskId: task._id}},
+-            isRootRequest: true
++            reports: {save: true, mergeProperties: {taskId: task._id}}
+         }
+     });
+ };
+
+From 62e8d2a291e8945a08b05f9f802375edd61b8c61 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Tue, 7 Apr 2015 15:37:25 +0200
+Subject: [PATCH] update dependencies
+
+---
+ extension/scheduling/public/js/scheduling.model.js       | 2 +-
+ extension/scheduling/public/js/scheduling.tasks.model.js | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/extension/scheduling/public/js/scheduling.model.js b/extension/scheduling/public/js/scheduling.model.js
+index 9b0d81bd4f3b760cd5d78eac1d3ded69c94aa720..9f330b1d04dc887285996f07d361ed713f8fec30 100644
+--- a/extension/scheduling/public/js/scheduling.model.js
++++ b/extension/scheduling/public/js/scheduling.model.js
+@@ -14,7 +14,7 @@
+                     });
+                     self.templates.unshift({name: "-- select template --"});
+                     if (self.get("shortid")) {
+-                        return app.dataProvider.get("odata/schedules?$filter=shortid eq " + self.get("shortid")).then(function (schedules) {
++                        return app.dataProvider.get("odata/schedules?$filter=shortid eq '" + self.get("shortid") + "'").then(function (schedules) {
+                             var schedule = schedules[0];
+                             self.set(schedule);
+                             self.set("templateName", _.findWhere(templates, {shortid: schedule.templateShortid}).name);
+diff --git a/extension/scheduling/public/js/scheduling.tasks.model.js b/extension/scheduling/public/js/scheduling.tasks.model.js
+index 4eaf270c99f50a989e4bbf36e0ed1d4928535549..1e25f673f39f42bb524c00d5aae8b2557f73a98c 100644
+--- a/extension/scheduling/public/js/scheduling.tasks.model.js
++++ b/extension/scheduling/public/js/scheduling.tasks.model.js
+@@ -22,7 +22,7 @@ define(["app", "backbone", "core/dataGrid"], function (app, Backbone, DataGrid)
+         url: function () {
+             var qs = this.filter.toOData();
+             qs.$orderby = "finishDate desc";
+-            qs.$filter = "scheduleShortid eq " + this.scheduleShortid;
++            qs.$filter = "scheduleShortid eq '" + this.scheduleShortid + "'";
+ 
+             return "odata/tasks?" + $.param(qs);
+         },
+
+From cabc0f16e2a147f279e3ee4ffd2a70e7677a3cff Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Thu, 23 Apr 2015 16:00:54 +0200
+Subject: [PATCH] #58 make sure that jsreport works correctly under subpath
+
+---
+ extension/scheduling/public/js/main_dev.js                         | 2 +-
+ extension/scheduling/public/templates/scheduling-list-toolbar.html | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/extension/scheduling/public/js/main_dev.js b/extension/scheduling/public/js/main_dev.js
+index b45124d37a8fb54ec6b1d51ae10bfa6cf28abd2c..62ca3c5b971cacad9e5c2dc0e8498f1e27ad0ffc 100644
+--- a/extension/scheduling/public/js/main_dev.js
++++ b/extension/scheduling/public/js/main_dev.js
+@@ -50,7 +50,7 @@
+ 
+             app.on("menu-render", function (context) {
+                 if (!app.settings.tenant || app.settings.tenant.isAdmin)
+-                    context.result += "<li><a href='/#/extension/scheduling/list'>Scheduling</a></li>";
++                    context.result += "<li><a href='#/extension/scheduling/list'>Scheduling</a></li>";
+             });
+ 
+             app.on("menu-actions-render", function (context) {
+diff --git a/extension/scheduling/public/templates/scheduling-list-toolbar.html b/extension/scheduling/public/templates/scheduling-list-toolbar.html
+index d85372c965698174de7a88dfbae0110939eabdd6..403fe273c292f77063ba6259cd7afb16110620a1 100644
+--- a/extension/scheduling/public/templates/scheduling-list-toolbar.html
++++ b/extension/scheduling/public/templates/scheduling-list-toolbar.html
+@@ -1,6 +1,6 @@
+ ﻿<div class="navbar-header submenu">
+     <ul class="nav navbar-nav sub-header">
+-        <li><a href="/#/extension/scheduling/detail"><i class="glyphicon glyphicon-plus"></i>New</a></li>
++        <li><a href="#/extension/scheduling/detail"><i class="glyphicon glyphicon-plus"></i>New</a></li>
+         <li><a id="deleteCommand"><i class="glyphicon glyphicon-trash"></i>Delete</a></li>
+     </ul>
+ </div>
+\ No newline at end of file
+
+From dc807ec68585ff25b1b77e26f39d61cd5b055372 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Thu, 28 May 2015 12:00:45 +0200
+Subject: [PATCH] split rendering part into the toner package
+
+---
+ extension/scheduling/test/jobProcessorTest.js | 2 +-
+ extension/scheduling/test/schedulingTest.js   | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/extension/scheduling/test/jobProcessorTest.js b/extension/scheduling/test/jobProcessorTest.js
+index 6a3511043ed88f51504781d1d34ad607d97bbe0e..e0c862744d0bd5704f19d6d3fe0d9265eec6fe1b 100644
+--- a/extension/scheduling/test/jobProcessorTest.js
++++ b/extension/scheduling/test/jobProcessorTest.js
+@@ -9,7 +9,7 @@ var assert = require("assert"),
+     JobProcessor = require("../lib/jobProcessor"),
+     describeReporting = require("../../../test/helpers.js").describeReporting;
+ 
+-describeReporting(path.join(__dirname, "../../"), ["templates", "reports", "scheduling"], function (reporter) {
++describeReporting(path.join(__dirname, "../../../"), ["templates", "reports", "scheduling"], function (reporter) {
+ 
+     describe('for jobProcessor', function () {
+ 
+diff --git a/extension/scheduling/test/schedulingTest.js b/extension/scheduling/test/schedulingTest.js
+index 3177a8a41ca48264271592ce9fbadb7754e40ea7..fd15d5965c997152486669f8b81291faba83e844 100644
+--- a/extension/scheduling/test/schedulingTest.js
++++ b/extension/scheduling/test/schedulingTest.js
+@@ -7,7 +7,7 @@ var assert = require("assert"),
+     should = require("should"),
+     describeReporting = require("../../../test/helpers.js").describeReporting;
+ 
+-describeReporting(path.join(__dirname, "../../"), ["html", "templates", "reports", "scheduling"], function (reporter) {
++describeReporting(path.join(__dirname, "../../../"), ["html", "templates", "reports", "scheduling"], function (reporter) {
+ 
+     describe('with scheduling extension', function () {
+ 
+@@ -48,7 +48,7 @@ describeReporting(path.join(__dirname, "../../"), ["html", "templates", "reports
+                 counter++;
+             });
+ 
+-            reporter.documentStore.collection("templates").insert({ content: "foo", recipe: "html" }).then(function(template) {
++            reporter.documentStore.collection("templates").insert({ content: "foo", recipe: "html", engine: "none" }).then(function(template) {
+                 return reporter.documentStore.collection("tasks").insert({ }).then(function(task) {
+                     return reporter.scheduling.renderReport({templateShortid: template.shortid}, task).then(function () {
+                         counter.should.be.exactly(1);
+
+From 487ccbbf7df1fb7f6a47548eceb49e3239f90ac0 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Mon, 22 Jun 2015 16:48:53 +0200
+Subject: [PATCH] fixes for mongo support
+
+---
+ extension/scheduling/lib/jobProcessor.js | 4 ++--
+ extension/scheduling/lib/scheduling.js   | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/extension/scheduling/lib/jobProcessor.js b/extension/scheduling/lib/jobProcessor.js
+index d3bc25930a608ea413ebc4ef7b08dd179e27e4dd..63056e8a81536810f0274947741615a1fff7adad 100644
+--- a/extension/scheduling/lib/jobProcessor.js
++++ b/extension/scheduling/lib/jobProcessor.js
+@@ -111,7 +111,7 @@ JobProcessor.prototype.processOne = function (schedule, task) {
+     });
+ };
+ 
+-JobProcessor.prototype.execute = function (schedule, task, context) {
++JobProcessor.prototype.execute = function (schedule, task) {
+     var self = this;
+ 
+     function insertTaskIfNotExists() {
+@@ -137,7 +137,7 @@ JobProcessor.prototype.execute = function (schedule, task, context) {
+             _id: schedule._id
+         }, {$set: {state: "planned", nextRun: new Date(nextRun.getTime())}});
+     }).then(function () {
+-        return self.executionHandler(schedule, task, context).then(function () {
++        return self.executionHandler(schedule, task).then(function () {
+             self.logger.debug("Processing schedule " + schedule.name + " succeeded.");
+             return self.documentStore.collection("tasks").update(
+                 {_id: task._id},
+diff --git a/extension/scheduling/lib/scheduling.js b/extension/scheduling/lib/scheduling.js
+index c6460bb2ff4a4a55bd07f1a3d475f787874dc69d..6bab8f950900c9f044ce5badb32bd071fa1c1a3f 100644
+--- a/extension/scheduling/lib/scheduling.js
++++ b/extension/scheduling/lib/scheduling.js
+@@ -98,8 +98,8 @@ Scheduling.prototype.renderReport = function (schedule, task) {
+         template: {shortid: schedule.templateShortid},
+         user : { isAdmin: true},
+         options: {
+-            scheduling: {taskId: task._id, scheduleShortid: schedule.shortid},
+-            reports: {save: true, mergeProperties: {taskId: task._id}}
++            scheduling: {taskId: task._id.toString(), scheduleShortid: schedule.shortid},
++            reports: {save: true, mergeProperties: {taskId: task._id.toString()}}
+         }
+     });
+ };
+
+From 4aebcbf71d7f4ea5ff5e8ec1ab3b563db061a369 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Fri, 17 Jul 2015 09:11:49 +0200
+Subject: [PATCH] running jobs in domains as every request
+
+---
+ extension/scheduling/lib/jobProcessor.js | 49 +++++++++++++++++++-------------
+ 1 file changed, 30 insertions(+), 19 deletions(-)
+
+diff --git a/extension/scheduling/lib/jobProcessor.js b/extension/scheduling/lib/jobProcessor.js
+index 63056e8a81536810f0274947741615a1fff7adad..9830d7cab63e993f9c6b9900f67e20a482d44836 100644
+--- a/extension/scheduling/lib/jobProcessor.js
++++ b/extension/scheduling/lib/jobProcessor.js
+@@ -1,6 +1,7 @@
+ var CronTime = require('cron').CronTime,
+     _ = require("underscore"),
+-    q = require("q");
++    q = require("q"),
++    domain = require("domain");
+ 
+ var JobProcessor = module.exports = function (executionHandler, documentStore, logger, TaskType, options) {
+ 
+@@ -36,7 +37,7 @@ JobProcessor.prototype._schedulesToProcessFilter = function () {
+ JobProcessor.prototype._tasksToRecoverFilter = function () {
+     return {
+         $and: [{ping: {$lt: new Date(this.options.now().getTime() - this.options.taskPingTimeout)}}, {state: "running"}]
+-    }
++    };
+ };
+ 
+ JobProcessor.prototype._pingRunningTasks = function () {
+@@ -66,30 +67,40 @@ JobProcessor.prototype.process = function (options) {
+     var self = this;
+     options = options || {};
+ 
+-    return this._pingRunningTasks().then(function () {
+-        if (self.currentlyRunningTasks.length >= self.options.maxParallelJobs) {
+-            return;
+-        }
++    var d = domain.create();
+ 
++    var defer = q.defer();
+ 
+-        return self._findTasksToRecover().then(function (tasks) {
+-            var promise = q.all(tasks.map(function (task) {
+-                self.logger.info("Recovering task " + task.schedule.name);
+-                return self.processOne(task.schedule, task);
+-            }));
+-            return options.waitForJobToFinish ? promise : q();
+-        }).then(function () {
+-            return self.documentStore.collection("schedules").find(self._schedulesToProcessFilter()).then(function (schedules) {
+-                var promise = q.all(schedules.map(function (s) {
+-                    return self.processOne(s, null);
+-                }));
++    d.run(function() {
++        self._pingRunningTasks().then(function () {
++            if (self.currentlyRunningTasks.length >= self.options.maxParallelJobs) {
++                return;
++            }
+ 
++            return self._findTasksToRecover().then(function (tasks) {
++                var promise = q.all(tasks.map(function (task) {
++                    self.logger.info("Recovering task " + task.schedule.name);
++                    return self.processOne(task.schedule, task);
++                }));
+                 return options.waitForJobToFinish ? promise : q();
++            }).then(function () {
++                return self.documentStore.collection("schedules").find(self._schedulesToProcessFilter()).then(function (schedules) {
++                    var promise = q.all(schedules.map(function (s) {
++                        return self.processOne(s, null);
++                    }));
++
++                    return options.waitForJobToFinish ? promise : q();
++                });
+             });
++        }).then(function() {
++            defer.resolve();
++        }).catch(function (e) {
++            self.logger.error("unable to load planned schedules " + e.stack);
++            defer.fail(e);
+         });
+-    }).catch(function (e) {
+-        self.logger.error("unable to load planned schedules " + e.stack);
+     });
++
++    return defer.promise;
+ };
+ 
+ JobProcessor.prototype.processOne = function (schedule, task) {
+
+From 5f8d702dca7cb12a72f6e54ac77b1d5f777adff9 Mon Sep 17 00:00:00 2001
+From: "honza.pofider@seznam.cz" <honza.pofider@seznam.cz>
+Date: Tue, 15 Sep 2015 18:05:00 +0200
+Subject: [PATCH] support for command line rendering
+
+---
+ extension/scheduling/jsreport.config.js | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/extension/scheduling/jsreport.config.js b/extension/scheduling/jsreport.config.js
+index fd0d27632534ac9c3a54c74cadc48b56f64ab4c5..6f5c9e1b7b5a812a31aeae353dcd536ea6568927 100644
+--- a/extension/scheduling/jsreport.config.js
++++ b/extension/scheduling/jsreport.config.js
+@@ -1,5 +1,6 @@
+ ﻿module.exports = {
+   "name": "scheduling",
+   "main": "lib/scheduling.js",
+-  "dependencies": ["templates", "reports"]
++  "dependencies": ["templates", "reports"],
++  "skipInExeRender": true
+ }
+\ No newline at end of file
