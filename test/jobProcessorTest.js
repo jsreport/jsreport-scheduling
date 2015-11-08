@@ -1,137 +1,139 @@
-/*globals describe, it, beforeEach, afterEach*/
+require('should')
+var path = require('path')
+var q = require('q')
+var JobProcessor = require('../lib/jobProcessor')
+var domain = require('domain')
+var Reporter = require('jsreport-core').Reporter
 
+describe('for jobProcessor', function () {
+  var reporter
 
-var assert = require("assert"),
-    join = require("path").join,
-    path = require("path"),
-    should = require("should"),
-    q = require("q"),
-    JobProcessor = require("../lib/jobProcessor"),
-    describeReporting = require("../../../test/helpers.js").describeReporting;
+  beforeEach(function (done) {
+    reporter = new Reporter({
+      rootDirectory: path.join(__dirname, '../')
+    })
 
-describeReporting(path.join(__dirname, "../../../"), ["templates", "reports", "scheduling"], function (reporter) {
+    reporter.init().then(function () {
+      process.domain = process.domain || domain.create()
+      process.domain.req = {}
+      done()
+    }).fail(done)
+  })
 
-    describe('for jobProcessor', function () {
+  it('process should call handler and create task', function (done) {
+    this.timeout(3000)
+    reporter.scheduling.stop()
 
-        it('process should call handler and create task', function (done) {
-            this.timeout(3000);
-            reporter.scheduling.stop();
+    reporter.documentStore.collection('schedules').insert({
+      cron: '*/1 * * * * *'
+    }).then(function () {
+      var counter = 0
 
-            reporter.documentStore.collection("schedules").insert({
-                cron: "*/1 * * * * *"
-            }).then(function () {
-                var counter = 0;
+      function exec () {
+        counter++
+        return q()
+      }
 
-                function exec() {
-                    counter++;
-                    return q();
-                }
+      var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
+        interval: 50,
+        maxParallelJobs: 1
+      })
+      return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+        return reporter.documentStore.collection('tasks').find({}).then(function (tasks) {
+          tasks.length.should.be.exactly(1)
+          tasks[0].state.should.be.exactly('success')
+          tasks[0].finishDate.should.be.ok
+          done()
+        })
+      })
+    }).catch(done)
+  })
 
-                var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
-                    interval: 50,
-                    maxParallelJobs: 1
-                });
-                return jobProcessor.process({waitForJobToFinish: true}).then(function () {
-                    return reporter.documentStore.collection("tasks").find({}).then(function (tasks) {
-                        tasks.length.should.be.exactly(1);
-                        tasks[0].state.should.be.exactly("success");
-                        tasks[0].finishDate.should.be.ok;
-                        done();
-                    });
-                });
-            }).catch(done);
-        });
+  it('should not cross maxParallelJobs', function (done) {
+    this.timeout(2000)
+    reporter.scheduling.stop()
 
-        it('should not cross maxParallelJobs', function (done) {
-            this.timeout(2000);
-            reporter.scheduling.stop();
+    reporter.documentStore.collection('schedules').insert({
+      cron: '*/1 * * * * *'
+    }).then(function () {
+      var counter = 0
 
-            reporter.documentStore.collection("schedules").insert({
-                cron: "*/1 * * * * *"
-            }).then(function () {
+      function exec () {
+        counter++
+        return q()
+      }
 
-                var counter = 0;
+      var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
+        interval: 50,
+        maxParallelJobs: 0
+      })
+      return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+        counter.should.be.exactly(0)
+        done()
+      })
+    }).catch(done)
+  })
 
-                function exec() {
-                    counter++;
-                    return q();
-                }
+  it('should recover failed tasks', function (done) {
+    reporter.scheduling.stop()
 
-                var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
-                    interval: 50,
-                    maxParallelJobs: 0
-                });
-                return jobProcessor.process({waitForJobToFinish: true}).then(function () {
-                    counter.should.be.exactly(0);
-                    done();
-                });
-            }).catch(done);
-        });
+    reporter.documentStore.collection('schedules').insert({
+      cron: '* * * * * 2090'
+    }).then(function (schedule) {
+      reporter.documentStore.collection('tasks').insert({
+        ping: new Date(1),
+        state: 'running',
+        scheduleShortid: schedule.shortid
+      })
+    }).then(function () {
+      var counter = 0
 
-        it('should recover failed tasks', function (done) {
-            reporter.scheduling.stop();
+      function exec () {
+        counter++
+        return q()
+      }
 
-            reporter.documentStore.collection("schedules").insert({
-                cron: "* * * * * 2090"
-            }).then(function (schedule) {
-                reporter.documentStore.collection("tasks").insert({
-                    ping: new Date(1),
-                    state: "running",
-                    scheduleShortid: schedule.shortid
-                });
-            }).then(function () {
-                var counter = 0;
+      var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
+        interval: 20,
+        maxParallelJobs: 1,
+        taskPingTimeout: 10
+      })
 
-                function exec() {
-                    counter++;
-                    return q();
-                }
+      return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+        counter.should.be.exactly(1)
+        done()
+      })
+    }).catch(done)
+  })
 
-                var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
-                    interval: 20,
-                    maxParallelJobs: 1,
-                    taskPingTimeout: 10
-                });
+  it('should ping running tasks', function (done) {
+    reporter.scheduling.stop()
 
-                return jobProcessor.process({waitForJobToFinish: true}).then(function () {
-                    counter.should.be.exactly(1);
-                    done();
-                });
-            }).catch(done);
-        });
+    reporter.documentStore.collection('schedules').insert({
+      cron: '* * * * * 2090'
+    }).then(function (schedule) {
+      return reporter.documentStore.collection('tasks').insert({
+        ping: new Date(new Date().getTime() - 1000),
+        state: 'running',
+        scheduleShortid: schedule.shortid
+      }).then(function (task) {
+        function exec () {
+          return q()
+        }
 
-        it('should ping running tasks', function (done) {
-            reporter.scheduling.stop();
-
-            reporter.documentStore.collection("schedules").insert({
-                cron: "* * * * * 2090"
-            }).then(function (schedule) {
-                return reporter.documentStore.collection("tasks").insert({
-                    ping: new Date(new Date().getTime() - 1000),
-                    state: "running",
-                    scheduleShortid: schedule.shortid
-                }).then(function (task) {
-
-                    var counter = 0;
-
-                    function exec() {
-                        return q();
-                    }
-
-                    var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
-                        interval: 20,
-                        maxParallelJobs: 1
-                    });
-                    jobProcessor.currentlyRunningTasks.push(task);
-                    return jobProcessor.process({waitForJobToFinish: true}).then(function () {
-                        return reporter.documentStore.collection("tasks").find({}).then(function (tasks) {
-                            tasks[0].ping.should.not.be.exactly(task.ping);
-                            done();
-                        });
-                    });
-                });
-            }).catch(done);
-        });
-    });
-});
+        var jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
+          interval: 20,
+          maxParallelJobs: 1
+        })
+        jobProcessor.currentlyRunningTasks.push(task)
+        return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+          return reporter.documentStore.collection('tasks').find({}).then(function (tasks) {
+            tasks[0].ping.should.not.be.exactly(task.ping)
+            done()
+          })
+        })
+      })
+    }).catch(done)
+  })
+})
 

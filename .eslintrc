@@ -1,0 +1,23 @@
+{
+  "extends": "standard",
+  "env": {
+    "node": true,
+    "mocha": true
+  },
+  "standard": {
+    "ignore": [
+      "public/**"
+    ],
+    "globals": [
+      "describe",
+      "it",
+      "beforeEach",
+      "define",
+      "ace"
+    ]
+  },
+  "globals": {
+    "define": true,
+    "ace": true
+  }
+}

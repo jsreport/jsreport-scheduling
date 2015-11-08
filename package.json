@@ -1,12 +1,26 @@
 {
   "name": "jsreport-scheduling",
   "version": "0.0.1",
-  "description": "jsreport extension for scheduling background rendering jobs ",
-  "scripts": {},
+  "description": "jsreport extension for scheduling background rendering jobs",
+  "scripts": {
+    "test": "mocha test && standard"
+  },
   "keywords": [
     "jsreport",
     "scheduling"
   ],
+  "standard": {
+    "ignore": [
+      "public/**"
+    ],
+    "globals": [
+      "describe",
+      "it",
+      "beforeEach",
+      "define",
+      "ace"
+    ]
+  },
   "license": "LGPL",
   "dependencies": {
     "cron": "^1.0.9",
@@ -15,5 +29,14 @@
     "underscore": "^1.8.3"
   },
   "author": "Jan Blaha",
-  "devDependencies": {}
+  "devDependencies": {
+    "eslint": "^1.9.0",
+    "jsreport-core": "*",
+    "mocha": "^2.3.3",
+    "should": "^7.1.1",
+    "standard": "^5.3.1",
+    "jsreport-core" : "*",
+    "jsreport-reports" : "*",
+    "jsreport-templates" : "*"
+  }
 }
