@@ -4,7 +4,7 @@
             template: "scheduling-toolbar",
 
             initialize: function () {
-                $(document).on('keydown.data-detail', this.hotkey.bind(this));
+                $(document).on('keydown.schedule-detail', this.hotkey.bind(this));
             },
 
             events: {
