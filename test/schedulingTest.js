@@ -1,6 +1,5 @@
 require('should')
 var path = require('path')
-var domain = require('domain')
 var Reporter = require('jsreport-core').Reporter
 
 describe('with scheduling extension', function () {
@@ -12,8 +11,6 @@ describe('with scheduling extension', function () {
     })
 
     reporter.init().then(function () {
-      process.domain = process.domain || domain.create()
-      process.domain.req = {}
       done()
     }).fail(done)
   })

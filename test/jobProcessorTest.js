@@ -2,7 +2,6 @@ require('should')
 var path = require('path')
 var q = require('q')
 var JobProcessor = require('../lib/jobProcessor')
-var domain = require('domain')
 var Reporter = require('jsreport-core').Reporter
 
 describe('for jobProcessor', function () {
@@ -14,8 +13,6 @@ describe('for jobProcessor', function () {
     })
 
     reporter.init().then(function () {
-      process.domain = process.domain || domain.create()
-      process.domain.req = {}
       done()
     }).fail(done)
   })
