@@ -1,23 +1,16 @@
 {
-  "extends": "standard",
+  "extends": ["standard", "standard-jsx"],
+  "parser": "babel-eslint",
+  "plugins": [
+    "babel"
+  ],
+  "rules": {
+    "babel/arrow-parens": 2,
+    "arrow-parens": 0
+  },
   "env": {
     "node": true,
-    "mocha": true
-  },
-  "standard": {
-    "ignore": [
-      "public/**"
-    ],
-    "globals": [
-      "describe",
-      "it",
-      "beforeEach",
-      "define",
-      "ace"
-    ]
-  },
-  "globals": {
-    "define": true,
-    "ace": true
+    "mocha": true,
+    "browser": true
   }
 }
