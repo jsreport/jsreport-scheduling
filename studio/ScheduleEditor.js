@@ -12,7 +12,7 @@ export default class ScheduleEditor extends Component {
 
   constructor () {
     super()
-    this.state = { tasks: [], active: null }
+    this.state = {tasks: [], active: null}
     this.skip = 0
     this.top = 50
     this.pending = 0
@@ -30,11 +30,18 @@ export default class ScheduleEditor extends Component {
     if (t.state === 'success') {
       const reports = await Studio.api.get(`/odata/reports?$filter=taskId eq '${t._id}'`)
       const report = reports.value[0]
-      Studio.setPreviewFrameSrc(`/reports/${report._id}/content`)
-      this.setState({ active: t._id })
+
+      if (report.contentType === 'text/html' || report.contentType === 'text/plain' ||
+        report.contentType === 'application/pdf' || (report.contentType && report.contentType.indexOf('image') !== -1)) {
+        Studio.setPreviewFrameSrc(`/reports/${report._id}/content`)
+      } else {
+        window.open(`${Studio.rootUrl}/reports/${report._id}/attachment`, '_self')
+      }
+
+      this.setState({active: t._id})
       _activeReport = report
     } else {
-      this.setState({ active: null })
+      this.setState({active: null})
       _activeReport = null
       Studio.setPreviewFrameSrc('data:text/html;charset=utf-8,' + encodeURI(t.error || t.state))
     }
@@ -49,7 +56,7 @@ export default class ScheduleEditor extends Component {
     const response = await Studio.api.get(`/odata/tasks?$orderby=finishDate desc&$count=true&$top=${this.top}&$skip=${this.skip}&$filter=scheduleShortid eq '${this.props.entity.shortid}'`)
     this.skip += this.top
     this.loading = false
-    this.setState({ tasks: this.state.tasks.concat(response.value), count: response['@odata.count'] })
+    this.setState({tasks: this.state.tasks.concat(response.value), count: response['@odata.count']})
     if (this.state.tasks.length <= this.pending && response.value.length) {
       this.lazyFetch()
     }
@@ -73,7 +80,8 @@ export default class ScheduleEditor extends Component {
       key={index} className={(this.state.active === task._id) ? 'active' : ''}
       onClick={() => this.openReport(task)}>
       <td>
-        <span className={style.state + ' ' + (task.state === 'error' ? style.error : (task.state === 'success' ? style.success : style.canceled))}>
+        <span
+          className={style.state + ' ' + (task.state === 'error' ? style.error : (task.state === 'success' ? style.success : style.canceled))}>
           {task.state}</span>
       </td>
       <td>
