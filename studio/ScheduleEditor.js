@@ -41,9 +41,9 @@ export default class ScheduleEditor extends Component {
       this.setState({active: t._id})
       _activeReport = report
     } else {
-      this.setState({active: null})
       _activeReport = null
       Studio.setPreviewFrameSrc('data:text/html;charset=utf-8,' + encodeURI(t.error || t.state))
+      this.setState({active: null})
     }
   }
 
