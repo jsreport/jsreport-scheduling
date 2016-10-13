@@ -1,6 +1,7 @@
 import React, { Component } from 'react'
 import ReactList from 'react-list'
 import Studio from 'jsreport-studio'
+import _debounce from 'lodash/debounce'
 import style from './ScheduleEditor.scss'
 
 let _activeReport
@@ -12,10 +13,18 @@ export default class ScheduleEditor extends Component {
 
   constructor () {
     super()
-    this.state = {tasks: [], active: null}
+    this.state = { tasks: [], active: null }
     this.skip = 0
     this.top = 50
     this.pending = 0
+    this.updateNextRun = _debounce(async () => {
+      if (this.props.entity.cron) {
+        const response = await Studio.api.get(`api/scheduling/nextRun/${this.props.entity.cron}`)
+        if (response !== this.props.entity.nextRun) {
+          this.props.onUpdate({ _id: this.props.entity._id, nextRun: response })
+        }
+      }
+    }, 500)
   }
 
   static get ActiveReport () {
@@ -24,6 +33,10 @@ export default class ScheduleEditor extends Component {
 
   componentWillMount () {
     this.lazyFetch()
+  }
+
+  componentDidUpdate () {
+    this.updateNextRun()
   }
 
   async openReport (t) {
@@ -38,12 +51,12 @@ export default class ScheduleEditor extends Component {
         window.open(`${Studio.rootUrl}/reports/${report._id}/attachment`, '_self')
       }
 
-      this.setState({active: t._id})
+      this.setState({ active: t._id })
       _activeReport = report
     } else {
       _activeReport = null
       Studio.setPreviewFrameSrc('data:text/html;charset=utf-8,' + encodeURI(t.error || t.state))
-      this.setState({active: null})
+      this.setState({ active: null })
     }
   }
 
@@ -56,7 +69,7 @@ export default class ScheduleEditor extends Component {
     const response = await Studio.api.get(`/odata/tasks?$orderby=finishDate desc&$count=true&$top=${this.top}&$skip=${this.skip}&$filter=scheduleShortid eq '${this.props.entity.shortid}'`)
     this.skip += this.top
     this.loading = false
-    this.setState({tasks: this.state.tasks.concat(response.value), count: response['@odata.count']})
+    this.setState({ tasks: this.state.tasks.concat(response.value), count: response['@odata.count'] })
     if (this.state.tasks.length <= this.pending && response.value.length) {
       this.lazyFetch()
     }
