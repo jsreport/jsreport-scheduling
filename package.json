@@ -30,25 +30,25 @@
   "license": "LGPL",
   "dependencies": {
     "bluebird": "3.4.7",
-    "cron": "1.1.0",
+    "cron": "1.2.1",
     "in-publish": "2.0.0",
     "shortid": "2.2.6",
     "underscore": "1.8.3"
   },
   "author": "Jan Blaha",
   "devDependencies": {
-    "babel-eslint": "6.0.5",
-    "eslint": "2.13.1",
-    "eslint-config-standard-jsx": "1.2.1",
-    "eslint-plugin-babel": "3.2.0",
-    "jsreport-core": "1.0.4",
+    "babel-eslint": "7.1.1",
+    "eslint": "3.14.1",
+    "eslint-config-standard-jsx": "3.2.0",
+    "eslint-plugin-babel": "4.0.1",
+    "jsreport-core": "1.0.10",
     "jsreport-reports": "1.0.2",
-    "jsreport-studio-dev": "1.0.0",
-    "jsreport-templates": "1.0.1",
-    "lodash": "4.16.4",
-    "mocha": "2.5.3",
-    "should": "9.0.2",
-    "standard": "7.1.2"
+    "jsreport-studio-dev": "1.0.2",
+    "jsreport-templates": "1.0.2",
+    "lodash": "4.17.4",
+    "mocha": "3.2.0",
+    "should": "11.2.0",
+    "standard": "8.6.0"
   },
   "files": [
     "lib",
