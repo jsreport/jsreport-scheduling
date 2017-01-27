@@ -38,6 +38,7 @@ describe('for jobProcessor', function () {
           tasks.length.should.be.exactly(1)
           tasks[0].state.should.be.exactly('success')
           tasks[0].finishDate.should.be.ok()
+          counter.should.be.exactly(1)
         })
       })
     })

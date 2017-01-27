@@ -22,7 +22,7 @@ export default class ScheduleProperties extends Component {
     const templates = this.selectTemplates(entities)
 
     if (!entity || entity.__entitySet !== 'schedules') {
-      return <div></div>
+      return <div />
     }
 
     return (
