@@ -29,9 +29,9 @@
   },
   "license": "LGPL",
   "dependencies": {
+    "bluebird": "3.4.7",
     "cron": "1.1.0",
     "in-publish": "2.0.0",
-    "q": "1.4.1",
     "shortid": "2.2.6",
     "underscore": "1.8.3"
   },
