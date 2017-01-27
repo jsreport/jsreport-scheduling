@@ -8,7 +8,12 @@ Studio.initializeListeners.push(async () => {
     return
   }
 
-  Studio.addEntitySet({ name: 'schedules', faIcon: 'fa-calendar', visibleName: 'schedule' })
+  Studio.addEntitySet({
+    name: 'schedules',
+    faIcon: 'fa-calendar',
+    visibleName: 'schedule',
+    entityTreePosition: 400
+  })
   Studio.addEditorComponent('schedules', ScheduleEditor)
   Studio.addPropertiesComponent(ScheduleProperties.title, ScheduleProperties, (entity) => entity.__entitySet === 'schedules')
   Studio.addToolbarComponent(DownloadButton)
