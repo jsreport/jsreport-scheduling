@@ -5,30 +5,27 @@ var Reporter = require('jsreport-core').Reporter
 describe('with scheduling extension', function () {
   var reporter
 
-  beforeEach(function (done) {
+  beforeEach(function () {
     reporter = new Reporter({
       rootDirectory: path.join(__dirname, '../')
     })
 
-    reporter.init().then(function () {
-      done()
-    }).fail(done)
+    return reporter.init()
   })
 
-  it('creating schedule should add default values', function (done) {
-    reporter.documentStore.collection('schedules').insert({
+  it('creating schedule should add default values', function () {
+    return reporter.documentStore.collection('schedules').insert({
       cron: '*/1 * * * * *',
       templateShortid: 'foo'
     }).then(function (schedule) {
-      schedule.nextRun.should.be.ok
-      schedule.creationDate.should.be.ok
+      schedule.nextRun.should.be.ok()
+      schedule.creationDate.should.be.ok()
       schedule.state.should.be.exactly('planned')
-      done()
-    }).catch(done)
+    })
   })
 
-  it('updating schedule should recalculate nextRun', function (done) {
-    reporter.documentStore.collection('schedules').insert({
+  it('updating schedule should recalculate nextRun', function () {
+    return reporter.documentStore.collection('schedules').insert({
       cron: '*/1 * * * * *',
       templateShortid: 'foo'
     }).then(function (schedule) {
@@ -40,13 +37,12 @@ describe('with scheduling extension', function () {
       })
     }).then(function () {
       return reporter.documentStore.collection('schedules').find({}).then(function (schedules) {
-        schedules[0].nextRun.should.be.ok
-        done()
+        schedules[0].nextRun.should.be.ok()
       })
-    }).catch(done)
+    })
   })
 
-  it('render process job should render report', function (done) {
+  it('render process job should render report', function () {
     reporter.scheduling.stop()
 
     var counter = 0
@@ -63,10 +59,9 @@ describe('with scheduling extension', function () {
       return reporter.documentStore.collection('tasks').insert({}).then(function (task) {
         return reporter.scheduling.renderReport({templateShortid: template.shortid}, task).then(function () {
           counter.should.be.exactly(1)
-          done()
         })
       })
-    }).catch(done)
+    })
   })
 })
 
