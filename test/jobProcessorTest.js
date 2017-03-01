@@ -6,13 +6,25 @@ var Reporter = require('jsreport-core').Reporter
 
 describe('for jobProcessor', function () {
   var reporter
+  var template
 
   beforeEach(function () {
     reporter = new Reporter({
-      rootDirectory: path.join(__dirname, '../')
+      rootDirectory: path.join(__dirname, '../'),
+      scheduling: {
+        minScheduleInterval: 0
+      }
     })
 
-    return reporter.init()
+    return reporter.init().then(function () {
+      return reporter.documentStore.collection('templates').insert({
+        content: 'foo',
+        engine: 'none',
+        recipe: 'html'
+      }).then(function (t) {
+        template = t
+      })
+    })
   })
 
   it('process should call handler and create task', function () {
@@ -20,7 +32,8 @@ describe('for jobProcessor', function () {
     reporter.scheduling.stop()
 
     return reporter.documentStore.collection('schedules').insert({
-      cron: '*/1 * * * * *'
+      cron: '*/1 * * * * *',
+      templateShortid: template.shortid
     }).then(function () {
       var counter = 0
 
@@ -49,7 +62,8 @@ describe('for jobProcessor', function () {
     reporter.scheduling.stop()
 
     return reporter.documentStore.collection('schedules').insert({
-      cron: '*/1 * * * * *'
+      cron: '*/1 * * * * *',
+      templateShortid: template.shortid
     }).then(function () {
       var counter = 0
 
@@ -72,7 +86,8 @@ describe('for jobProcessor', function () {
     reporter.scheduling.stop()
 
     return reporter.documentStore.collection('schedules').insert({
-      cron: '* * * * * 2090'
+      cron: '* * * * * 2090',
+      templateShortid: template.shortid
     }).then(function (schedule) {
       reporter.documentStore.collection('tasks').insert({
         ping: new Date(1),
@@ -103,7 +118,8 @@ describe('for jobProcessor', function () {
     reporter.scheduling.stop()
 
     return reporter.documentStore.collection('schedules').insert({
-      cron: '* * * * * 2090'
+      cron: '* * * * * 2090',
+      templateShortid: template.shortid
     }).then(function (schedule) {
       return reporter.documentStore.collection('tasks').insert({
         ping: new Date(new Date().getTime() - 1000),
@@ -123,6 +139,47 @@ describe('for jobProcessor', function () {
           return reporter.documentStore.collection('tasks').find({}).then(function (tasks) {
             tasks[0].ping.should.not.be.exactly(task.ping)
           })
+        })
+      })
+    })
+  })
+
+  it('_findTasksToRecover should skip tasks without schedules', function () {
+    reporter.scheduling.stop()
+
+    return reporter.documentStore.collection('tasks').insert({
+      ping: new Date(1),
+      state: 'running',
+      scheduleShortid: 'invalid'
+    }).then(function () {
+      var jobProcessor = new JobProcessor(function () {}, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
+        interval: 50,
+        maxParallelJobs: 1
+      })
+
+      return jobProcessor._findTasksToRecover()
+    }).then(function (tasks) {
+      tasks.should.have.length(0)
+    })
+  })
+
+  it('process should error schedules with missing templates', function () {
+    this.timeout(3000)
+    reporter.scheduling.stop()
+
+    return reporter.documentStore.collection('schedules').insert({
+      cron: '*/1 * * * * *',
+      templateShortid: 'invalid'
+    }).then(function () {
+      var jobProcessor = new JobProcessor(function () { }, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
+        interval: 50,
+        maxParallelJobs: 1
+      })
+      return jobProcessor.process({waitForJobToFinish: true}).then(function () {
+        return reporter.documentStore.collection('tasks').find({}).then(function (tasks) {
+          tasks.length.should.be.exactly(1)
+          tasks[0].state.should.be.exactly('error')
+          tasks[0].error.should.containEql('Template')
         })
       })
     })

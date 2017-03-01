@@ -20,9 +20,7 @@ export default class ScheduleEditor extends Component {
     this.updateNextRun = _debounce(async () => {
       if (this.props.entity.cron) {
         const response = await Studio.api.get(`api/scheduling/nextRun/${this.props.entity.cron}`)
-        if (response !== this.props.entity.nextRun) {
-          this.props.onUpdate({ _id: this.props.entity._id, nextRun: response })
-        }
+        this.setState({ nextRun: response })
       }
     }, 500)
   }
@@ -35,8 +33,18 @@ export default class ScheduleEditor extends Component {
     this.lazyFetch()
   }
 
-  componentDidUpdate () {
+  componentWillUnmount () {
+    this.updateNextRun.cancel()
+  }
+
+  componentDidMount () {
     this.updateNextRun()
+  }
+
+  componentDidUpdate (prevProps, prevState) {
+    if (this.props.entity.cron !== prevProps.entity.cron) {
+      this.updateNextRun()
+    }
   }
 
   async openReport (t) {
@@ -121,12 +129,13 @@ export default class ScheduleEditor extends Component {
 
   render () {
     const { entity } = this.props
-    const { count } = this.state
+    let { count, nextRun } = this.state
+    nextRun = nextRun || entity.nextRun
 
     return <div className='block custom-editor'>
       <div><h1><i className='fa fa-calendar' /> {entity.name}</h1>
-        {entity.nextRun ? (<div><span>next run&nbsp;&nbsp;</span>
-          <small>{entity.nextRun.toLocaleString()}</small>
+        {nextRun ? (<div><span>next run&nbsp;&nbsp;</span>
+          <small>{nextRun.toLocaleString()}</small>
         </div>) : <div>Not planned yet. Fill CRON expression and report template in the properties.</div>}
       </div>
       <div className={style.listContainer + ' block-item'}>
