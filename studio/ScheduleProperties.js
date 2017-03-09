@@ -14,7 +14,7 @@ export default class ScheduleProperties extends Component {
       return 'schedule (select template...)'
     }
 
-    return `schedule (${templates[0].name}) ${entity.enabled !== true ? '(disabled)' : ''}`
+    return `schedule (${templates[0].name}) ${entity.enabled !== true && entity.enabled != null ? '(disabled)' : ''}`
   }
 
   render () {
@@ -49,4 +49,3 @@ export default class ScheduleProperties extends Component {
     )
   }
 }
-
