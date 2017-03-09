@@ -13,13 +13,13 @@ export default class ScheduleEditor extends Component {
 
   constructor () {
     super()
-    this.state = { tasks: [], active: null }
+    this.state = { tasks: [], active: null, running: false }
     this.skip = 0
     this.top = 50
     this.pending = 0
     this.updateNextRun = _debounce(async () => {
       if (this.props.entity.cron) {
-        const response = await Studio.api.get(`api/scheduling/nextRun/${this.props.entity.cron}`)
+        const response = await Studio.api.get(`/api/scheduling/nextRun/${encodeURIComponent(this.props.entity.cron)}`)
         this.setState({ nextRun: response })
       }
     }, 500)
@@ -68,7 +68,15 @@ export default class ScheduleEditor extends Component {
     }
   }
 
-  async lazyFetch () {
+  async reloadTasks () {
+    this.skip = 0
+    this.top = 50
+    this.pending = 0
+
+    this.lazyFetch(true)
+  }
+
+  async lazyFetch (replace) {
     if (this.loading) {
       return
     }
@@ -77,9 +85,38 @@ export default class ScheduleEditor extends Component {
     const response = await Studio.api.get(`/odata/tasks?$orderby=finishDate desc&$count=true&$top=${this.top}&$skip=${this.skip}&$filter=scheduleShortid eq '${this.props.entity.shortid}'`)
     this.skip += this.top
     this.loading = false
-    this.setState({ tasks: this.state.tasks.concat(response.value), count: response['@odata.count'] })
+
+    let tasks
+
+    if (replace) {
+      tasks = []
+    } else {
+      tasks = this.state.tasks
+    }
+
+    this.setState({ tasks: tasks.concat(response.value), count: response['@odata.count'] })
     if (this.state.tasks.length <= this.pending && response.value.length) {
       this.lazyFetch()
+    }
+  }
+
+  async runNow () {
+    this.setState({
+      running: true
+    })
+
+    try {
+      await Studio.api.post(`/api/scheduling/runNow`, {
+        data: {
+          scheduleId: this.props.entity._id
+        }
+      })
+
+      this.reloadTasks()
+    } finally {
+      this.setState({
+        running: false
+      })
     }
   }
 
@@ -132,17 +169,36 @@ export default class ScheduleEditor extends Component {
     let { count, nextRun } = this.state
     nextRun = nextRun || entity.nextRun
 
-    return <div className='block custom-editor'>
-      <div><h1><i className='fa fa-calendar' /> {entity.name}</h1>
-        {nextRun ? (<div><span>next run&nbsp;&nbsp;</span>
-          <small>{nextRun.toLocaleString()}</small>
-        </div>) : <div>Not planned yet. Fill CRON expression and report template in the properties.</div>}
+    return (
+      <div className='block custom-editor'>
+        <div>
+          <h1><i className='fa fa-calendar' /> {entity.name}</h1>
+          {nextRun ? (
+            <div>
+              <span>next run&nbsp;&nbsp;</span>
+              <small>{nextRun.toLocaleString()}</small>
+              {!this.props.entity.__isNew && (
+                <button
+                  disabled={this.state.running}
+                  style={this.state.running ? { color: '#c6c6c6' } : {}}
+                  className='button confirmation'
+                  onClick={() => this.runNow()}
+                >
+                  <i className='fa fa-play' />
+                  {' '}
+                  <span>{this.state.running ? 'Running..' : 'Run now'}</span>
+                </button>
+              )}
+            </div>
+          ) : <div>Not planned yet. Fill CRON expression and report template in the properties.</div>}
+        </div>
+        <div className={style.listContainer + ' block-item'}>
+          <ReactList
+            type='uniform' itemsRenderer={this.renderItems} itemRenderer={(index) => this.tryRenderItem(index)}
+            length={count}
+          />
+        </div>
       </div>
-      <div className={style.listContainer + ' block-item'}>
-        <ReactList
-          type='uniform' itemsRenderer={this.renderItems} itemRenderer={(index) => this.tryRenderItem(index)}
-          length={count} />
-      </div>
-    </div>
+    )
   }
 }
