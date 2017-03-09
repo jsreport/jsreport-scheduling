@@ -66,7 +66,7 @@ describe('with scheduling extension', function () {
       counter++
     })
 
-    reporter.documentStore.collection('templates').insert({
+    return reporter.documentStore.collection('templates').insert({
       content: 'foo',
       recipe: 'html',
       engine: 'none'
