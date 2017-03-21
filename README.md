@@ -4,13 +4,13 @@
 
 > jsreport extension for scheduling background rendering jobs
 
-See http://jsreport.net/learn/scheduling
+See https://jsreport.net/learn/scheduling
 
 
-##Installation
+## Installation
 > npm install jsreport-resources
 
-##jsreport-core
+## jsreport-core
 You can apply this extension also manually to [jsreport-core](https://github.com/jsreport/jsreport-scheduling)
 
 ```js
