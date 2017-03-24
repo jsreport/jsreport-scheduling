@@ -354,7 +354,7 @@ export default class ScheduleProperties extends Component {
           )}
           {!useExpression && (showHour || showMinute) && (
             <div className='form-group'>
-              <label>
+              <div>
                 at
                 {' '}
                 <div style={{ display: 'inline-block' }}>
@@ -374,7 +374,7 @@ export default class ScheduleProperties extends Component {
                     />
                   )}
                 </div>
-              </label>
+              </div>
             </div>
           )}
         </div>
