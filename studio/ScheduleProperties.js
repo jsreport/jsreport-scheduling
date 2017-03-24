@@ -23,10 +23,6 @@ export default class ScheduleProperties extends Component {
     }
   }
 
-  selectTemplates (entities) {
-    return Object.keys(entities).filter((k) => entities[k].__entitySet === 'templates').map((k) => entities[k])
-  }
-
   static title (entity, entities) {
     const templates = Object.keys(entities).map((k) => entities[k])
       .filter((t) => t.__entitySet === 'templates' && t.shortid === entity.templateShortid)
@@ -36,6 +32,211 @@ export default class ScheduleProperties extends Component {
     }
 
     return `schedule (${templates[0].name}) ${entity.enabled !== true && entity.enabled != null ? '(disabled)' : ''}`
+  }
+
+  componentWillMount () {
+    this.normalizeUIState(this.props.entity)
+  }
+
+  componentWillReceiveProps (nextProps) {
+    // when component changes because another schedule is selected
+    // or when saving a new schedule
+    if (this.props.entity._id !== nextProps.entity._id) {
+      this.normalizeUIState(nextProps.entity)
+    }
+  }
+
+  normalizeUIState (entity) {
+    let cronInfo
+
+    if (entity.__isNew || !entity.cron) {
+      cronInfo = this.onPeriodChange('', true)
+    } else {
+      cronInfo = this.getCronInformation(entity.cron)
+    }
+
+    if (cronInfo) {
+      cronInfo.useExpression = false
+    } else {
+      // if we couldn't parse the cron for the UI
+      // reset values and enable the raw expression input
+      cronInfo = this.onPeriodChange('', true)
+      cronInfo.useExpression = true
+    }
+
+    this.setState(cronInfo)
+  }
+
+  getCronInformation (cron) {
+    try {
+      const cronExp = new CronBuilder(cron)
+      const parsedCron = cronExp.getAll()
+      let cronInfo
+      let selectedPeriod
+      let selectedHour
+      let selectedMinute
+      let selectedDay
+      let selectedMonth
+      let selectedDayOfTheMonth
+      let selectedDayOfTheWeek
+
+      // our cron editor doesn't support complex values
+      if (
+        parsedCron.dayOfTheMonth.length !== 1 ||
+        parsedCron.dayOfTheWeek.length !== 1 ||
+        parsedCron.hour.length !== 1 ||
+        parsedCron.minute.length !== 1 ||
+        parsedCron.month.length !== 1
+      ) {
+        return null
+      }
+
+      if (
+        parsedCron.dayOfTheMonth[0] === '*' ||
+        !isNaN(parseInt(parsedCron.dayOfTheMonth[0], 10))
+      ) {
+        selectedDayOfTheMonth = parsedCron.dayOfTheMonth[0] !== '*' ? parseInt(parsedCron.dayOfTheMonth[0], 10) : parsedCron.dayOfTheMonth[0]
+      }
+
+      if (
+        parsedCron.dayOfTheWeek[0] === '*' ||
+        !isNaN(parseInt(parsedCron.dayOfTheWeek[0], 10))
+      ) {
+        selectedDayOfTheWeek = parsedCron.dayOfTheWeek[0] !== '*' ? parseInt(parsedCron.dayOfTheWeek[0], 10) : parsedCron.dayOfTheWeek[0]
+      }
+
+      if (
+        parsedCron.hour[0] === '*' ||
+        !isNaN(parseInt(parsedCron.hour[0], 10))
+      ) {
+        selectedHour = parsedCron.hour[0] !== '*' ? ('0' + parsedCron.hour[0]).slice(-2) : parsedCron.hour[0]
+      }
+
+      if (
+        parsedCron.minute[0] === '*' ||
+        !isNaN(parseInt(parsedCron.minute[0], 10))
+      ) {
+        selectedMinute = parsedCron.minute[0] !== '*' ? ('0' + parsedCron.minute[0]).slice(-2) : parsedCron.minute[0]
+      }
+
+      if (
+        parsedCron.month[0] === '*' ||
+        !isNaN(parseInt(parsedCron.month[0], 10))
+      ) {
+        selectedMonth = parsedCron.month[0] !== '*' ? ('0' + parsedCron.month[0]).slice(-2) : parsedCron.month[0]
+      }
+
+      // return early if we don't have any value
+      if (
+        !selectedDayOfTheMonth &&
+        !selectedDayOfTheWeek &&
+        !selectedHour &&
+        !selectedMinute &&
+        !selectedMonth
+      ) {
+        return null
+      }
+
+      if (selectedDayOfTheWeek !== '*') {
+        selectedDay = selectedDayOfTheWeek
+      } else {
+        selectedDay = selectedDayOfTheMonth
+      }
+
+      if (
+        selectedDayOfTheMonth === '*' &&
+        selectedDayOfTheWeek === '*' &&
+        selectedHour === '*' &&
+        selectedMinute === '*' &&
+        selectedMonth === '*'
+      ) {
+        selectedPeriod = 'mn'
+        cronInfo = {}
+      } else if (
+        selectedDayOfTheMonth === '*' &&
+        selectedDayOfTheWeek === '*' &&
+        selectedHour === '*' &&
+        selectedMonth === '*' &&
+        selectedMinute !== '*'
+      ) {
+        selectedPeriod = 'h'
+
+        cronInfo = {
+          selectedMinute: selectedMinute
+        }
+      } else if (
+        selectedDayOfTheMonth === '*' &&
+        selectedDayOfTheWeek === '*' &&
+        selectedMonth === '*' &&
+        selectedHour !== '*' &&
+        selectedMinute !== '*'
+      ) {
+        selectedPeriod = 'd'
+
+        cronInfo = {
+          selectedHour: selectedHour,
+          selectedMinute: selectedMinute
+        }
+      } else if (
+        selectedDayOfTheMonth === '*' &&
+        selectedMonth === '*' &&
+        selectedDayOfTheWeek !== '*' &&
+        selectedHour !== '*' &&
+        selectedMinute !== '*'
+      ) {
+        selectedPeriod = 'w'
+
+        cronInfo = {
+          selectedDay: selectedDay,
+          selectedHour: selectedHour,
+          selectedMinute: selectedMinute
+        }
+      } else if (
+        selectedDayOfTheWeek === '*' &&
+        selectedMonth === '*' &&
+        selectedDayOfTheMonth !== '*' &&
+        selectedHour !== '*' &&
+        selectedMinute !== '*'
+      ) {
+        selectedPeriod = 'm'
+
+        cronInfo = {
+          selectedDay: selectedDay,
+          selectedHour: selectedHour,
+          selectedMinute: selectedMinute
+        }
+      } else if (
+        selectedDayOfTheWeek === '*' &&
+        selectedDayOfTheMonth !== '*' &&
+        selectedMonth !== '*' &&
+        selectedHour !== '*' &&
+        selectedMinute !== '*'
+      ) {
+        selectedPeriod = 'y'
+
+        cronInfo = {
+          selectedDay: selectedDay,
+          selectedMonth: selectedMonth,
+          selectedHour: selectedHour,
+          selectedMinute: selectedMinute
+        }
+      }
+
+      // if the period can't be detected just return
+      if (!selectedPeriod) {
+        return null
+      }
+
+      cronInfo = { ...this.onPeriodChange(selectedPeriod, true), ...cronInfo }
+
+      return cronInfo
+    } catch (e) {
+      return null
+    }
+  }
+
+  selectTemplates (entities) {
+    return Object.keys(entities).filter((k) => entities[k].__entitySet === 'templates').map((k) => entities[k])
   }
 
   onCronBuilderChange (stateToSet) {
