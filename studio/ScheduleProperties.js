@@ -239,7 +239,29 @@ export default class ScheduleProperties extends Component {
     return Object.keys(entities).filter((k) => entities[k].__entitySet === 'templates').map((k) => entities[k])
   }
 
-  onCronBuilderChange (stateToSet) {
+  onUseExpressionChange (checked) {
+    let { entity } = this.props
+    let resetCron = false
+    let uiCronInfo
+
+    if (!checked) {
+      uiCronInfo = this.getCronInformation(entity.cron)
+
+      if (!uiCronInfo) {
+        uiCronInfo = this.onPeriodChange('', true)
+        resetCron = true
+      }
+    } else {
+      uiCronInfo = this.onPeriodChange('', true)
+    }
+
+    this.onCronBuilderChange({
+      useExpression: checked,
+      ...uiCronInfo
+    }, resetCron)
+  }
+
+  onCronBuilderChange (stateToSet, resetCron) {
     const cronExp = new CronBuilder()
 
     let {
@@ -298,17 +320,19 @@ export default class ScheduleProperties extends Component {
       cronExp.addValue('minute', String(parseInt(selectedMinute, 10)))
       cronExp.addValue('month', String(parseInt(selectedMonth, 10)))
     } else {
-      cron = ''
+      cron = resetCron ? '' : this.props.entity.cron
     }
 
     if (cron == null) {
       cron = cronExp.build()
     }
 
-    onChange({
-      _id: entity._id,
-      cron: cron
-    })
+    if (cron !== this.props.entity.cron) {
+      onChange({
+        _id: entity._id,
+        cron: cron
+      })
+    }
 
     if (stateToSet) {
       this.setState(stateToSet)
@@ -482,10 +506,7 @@ export default class ScheduleProperties extends Component {
               <input
                 type='checkbox'
                 checked={useExpression}
-                onChange={(v) => this.onCronBuilderChange({
-                  useExpression: v.target.checked,
-                  ...this.onPeriodChange('', true)
-                })}
+                onChange={(v) => this.onUseExpressionChange(v.target.checked)}
               />
               Use expression
             </label>
