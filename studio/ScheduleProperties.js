@@ -59,15 +59,25 @@ export default class ScheduleProperties extends Component {
       cronInfo.useExpression = false
     } else {
       // if we couldn't parse the cron for the UI
-      // reset values and enable the raw expression input
-      cronInfo = this.onPeriodChange('', true)
-      cronInfo.useExpression = true
+      // reset values and enable the raw expression input.
+      // false is returned when we want to still show the value in the UI editor
+      if (cronInfo === false) {
+        cronInfo = this.onPeriodChange('', true)
+        cronInfo.useExpression = false
+      } else {
+        cronInfo = this.onPeriodChange('', true)
+        cronInfo.useExpression = true
+      }
     }
 
     this.setState(cronInfo)
   }
 
   getCronInformation (cron) {
+    if (cron == null || cron === '') {
+      return false
+    }
+
     try {
       const cronExp = new CronBuilder(cron)
       const parsedCron = cronExp.getAll()
@@ -277,7 +287,7 @@ export default class ScheduleProperties extends Component {
       selectedMonth
     } = this.state
 
-    let cron
+    let cron = false
 
     if (stateToSet && stateToSet.selectedPeriod !== undefined) {
       selectedPeriod = stateToSet.selectedPeriod
@@ -323,7 +333,7 @@ export default class ScheduleProperties extends Component {
       cron = resetCron ? '' : this.props.entity.cron
     }
 
-    if (cron == null) {
+    if (cron === false) {
       cron = cronExp.build()
     }
 
