@@ -4,6 +4,7 @@
   "description": "jsreport extension for scheduling background rendering jobs",
   "scripts": {
     "start": "jsreport-studio-start --httpPort 5488",
+    "run": "npm run build && jsreport-studio-start --httpPort 5488 --run-only",
     "test": "mocha test --timeout=10000 && standard",
     "build": "jsreport-studio-build",
     "prepublish": "in-publish && jsreport-studio-build || not-in-publish"
