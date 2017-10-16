@@ -27,8 +27,8 @@ class HourTimePicker extends Component {
       <div style={{ display: 'inline-block' }}>
         <input
           type='text'
-          disabled
-          style={{ width: '30px' }}
+          readOnly
+          style={{ width: '30px', cursor: 'pointer' }}
           value={value}
           onClick={() => this.setState({ editing: true })}
         />
