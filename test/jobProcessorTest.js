@@ -185,4 +185,3 @@ describe('for jobProcessor', function () {
     })
   })
 })
-

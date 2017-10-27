@@ -3,11 +3,6 @@ import ScheduleEditor from './ScheduleEditor'
 import Studio from 'jsreport-studio'
 
 export default class DownloadButton extends Component {
-  static propTypes = {
-    tab: React.PropTypes.object,
-    onUpdate: React.PropTypes.func.isRequired
-  }
-
   download () {
     if (ScheduleEditor.ActiveReport) {
       window.open(`${Studio.rootUrl}/reports/${ScheduleEditor.ActiveReport._id}/attachment`, '_self')
@@ -25,3 +20,7 @@ export default class DownloadButton extends Component {
   }
 }
 
+DownloadButton.propTypes = {
+  tab: React.PropTypes.object,
+  onUpdate: React.PropTypes.func.isRequired
+}

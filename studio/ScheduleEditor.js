@@ -6,11 +6,6 @@ import style from './ScheduleEditor.scss'
 
 let _activeReport
 export default class ScheduleEditor extends Component {
-  static propTypes = {
-    entity: React.PropTypes.object.isRequired,
-    onUpdate: React.PropTypes.func.isRequired
-  }
-
   constructor () {
     super()
     this.state = { tasks: [], active: null, running: false }
@@ -201,4 +196,9 @@ export default class ScheduleEditor extends Component {
       </div>
     )
   }
+}
+
+ScheduleEditor.propTypes = {
+  entity: React.PropTypes.object.isRequired,
+  onUpdate: React.PropTypes.func.isRequired
 }
