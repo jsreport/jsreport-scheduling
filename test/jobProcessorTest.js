@@ -42,7 +42,9 @@ describe('for jobProcessor', () => {
 
     const jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
       interval: 50,
-      maxParallelJobs: 1
+      maxParallelJobs: 1,
+      // mark now as 1 second in future in order to find the schedule
+      now: () => new Date(new Date().getTime() + 1000)
     })
     await jobProcessor.process({waitForJobToFinish: true})
     const tasks = await reporter.documentStore.collection('tasks').find({})
@@ -69,7 +71,9 @@ describe('for jobProcessor', () => {
 
     const jobProcessor = new JobProcessor(exec, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
       interval: 50,
-      maxParallelJobs: 0
+      maxParallelJobs: 0,
+      // mark now as 1 second in future in order to find the schedule
+      now: () => new Date(new Date().getTime() + 1000)
     })
     await jobProcessor.process({waitForJobToFinish: true})
     counter.should.be.exactly(0)
@@ -79,7 +83,7 @@ describe('for jobProcessor', () => {
     reporter.scheduling.stop()
 
     const schedule = await reporter.documentStore.collection('schedules').insert({
-      cron: '* * * * * 2090',
+      cron: `* * * * * ${new Date().getMonth() + 1}`,
       templateShortid: template.shortid
     })
     await reporter.documentStore.collection('tasks').insert({
@@ -109,7 +113,7 @@ describe('for jobProcessor', () => {
     reporter.scheduling.stop()
 
     const schedule = await reporter.documentStore.collection('schedules').insert({
-      cron: '* * * * * 2090',
+      cron: `* * * * * ${new Date().getMonth() + 1}`,
       templateShortid: template.shortid
     })
 
@@ -163,7 +167,9 @@ describe('for jobProcessor', () => {
 
     const jobProcessor = new JobProcessor(function () { }, reporter.documentStore, reporter.logger, reporter.scheduling.TaskType, {
       interval: 50,
-      maxParallelJobs: 1
+      maxParallelJobs: 1,
+      // mark now as 1 second in future in order to find the schedule
+      now: () => new Date(new Date().getTime() + 1000)
     })
 
     await jobProcessor.process({waitForJobToFinish: true})
