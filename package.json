@@ -31,7 +31,6 @@
   },
   "license": "LGPL",
   "dependencies": {
-    "bluebird": "3.5.1",
     "cron": "1.3.0",
     "cron-builder": "0.3.0",
     "cronstrue": "1.1.0",

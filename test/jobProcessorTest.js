@@ -1,5 +1,4 @@
 require('should')
-const Promise = require('bluebird')
 const JobProcessor = require('../lib/jobProcessor')
 const jsreport = require('jsreport-core')
 
