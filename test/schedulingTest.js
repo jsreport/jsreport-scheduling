@@ -137,4 +137,11 @@ describe('with scheduling extension and minimal schedule interval limit', () => 
       templateShortid: template.shortid
     }).should.be.rejected()
   })
+
+  it('should throw with cron expression with less than 5 parts', () => {
+    return reporter.documentStore.collection('schedules').insert({
+      cron: '* * *',
+      templateShortid: template.shortid
+    }).should.be.rejected()
+  })
 })
