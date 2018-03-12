@@ -1190,15 +1190,15 @@
 	
 	
 	// module
-	exports.push([module.id, ".listContainer___2vlbv {\n  margin-top: 1rem;\n  overflow: auto;\n  position: relative;\n  padding: 1rem;\n  min-height: 0;\n  height: auto;\n}\n\n.listContainer___2vlbv > div {\n  width: 95%;\n  position: absolute !important;\n}\n\n.state___2jyma {\n  font-size: 0.8rem;\n  padding: 0.3rem;\n  display: inline-block;\n  text-align: center;\n  min-width: 4rem;\n}\n\n.error___30LhV {\n  background-color: #da532c;\n  color: white;\n}\n\n.cancelled___3S1EC {\n  background-color: orange;\n  color: white;\n}\n\n.success___jImHn {\n  background-color: #4CAF50;\n  color: white;\n}\n", "", {"version":3,"sources":["/./studio/studio/ScheduleEditor.scss"],"names":[],"mappings":"AAAA;EACE,iBAAgB;EAChB,eAAc;EACd,mBAAkB;EAClB,cAAa;EACb,cAAa;EACb,aAAY;CACb;;AAED;EAEE,WAAU;EAEV,8BAA6B;CAC9B;;AAED;EACE,kBAAiB;EACjB,gBAAe;EACf,sBAAqB;EACrB,mBAAkB;EAClB,gBAAe;CAChB;;AAED;EACE,0BAAyB;EACzB,aAAY;CACb;;AAED;EACE,yBAAwB;EACxB,aAAY;CACb;;AAED;EACE,0BAAyB;EACzB,aAAY;CACb","file":"ScheduleEditor.scss","sourcesContent":[".listContainer {\r\n  margin-top: 1rem;\r\n  overflow: auto;\r\n  position: relative;\r\n  padding: 1rem;\r\n  min-height: 0;\r\n  height: auto;\r\n}\r\n\r\n.listContainer > div {\r\n  // it somehow shows the horizontal scrollbar even when no needeit, this workaround to hide it\r\n  width: 95%;\r\n  // the tabs height based on flex box is otherwise wrongly calculated\r\n  position: absolute !important;\r\n}\r\n\r\n.state {\r\n  font-size: 0.8rem;\r\n  padding: 0.3rem;\r\n  display: inline-block;\r\n  text-align: center;\r\n  min-width: 4rem;\r\n}\r\n\r\n.error {\r\n  background-color: #da532c;\r\n  color: white;\r\n}\r\n\r\n.cancelled {\r\n  background-color: orange;\r\n  color: white;\r\n}\r\n\r\n.success {\r\n  background-color: #4CAF50;\r\n  color: white;\r\n}\r\n\r\n"],"sourceRoot":"webpack://"}]);
+	exports.push([module.id, ".listContainer___aJHAE {\n  margin-top: 1rem;\n  overflow: auto;\n  position: relative;\n  padding: 1rem;\n  min-height: 0;\n  height: auto;\n}\n\n.listContainer___aJHAE > div {\n  width: 95%;\n  position: absolute !important;\n}\n\n.state___1rOi5 {\n  font-size: 0.8rem;\n  padding: 0.3rem;\n  display: inline-block;\n  text-align: center;\n  min-width: 4rem;\n}\n\n.error___3G79z {\n  background-color: #da532c;\n  color: white;\n}\n\n.cancelled___1OTeY {\n  background-color: orange;\n  color: white;\n}\n\n.success___z5MBj {\n  background-color: #4CAF50;\n  color: white;\n}\n", "", {"version":3,"sources":["/./studio/studio/ScheduleEditor.scss"],"names":[],"mappings":"AAAA;EACE,iBAAgB;EAChB,eAAc;EACd,mBAAkB;EAClB,cAAa;EACb,cAAa;EACb,aAAY;CACb;;AAED;EAEE,WAAU;EAEV,8BAA6B;CAC9B;;AAED;EACE,kBAAiB;EACjB,gBAAe;EACf,sBAAqB;EACrB,mBAAkB;EAClB,gBAAe;CAChB;;AAED;EACE,0BAAyB;EACzB,aAAY;CACb;;AAED;EACE,yBAAwB;EACxB,aAAY;CACb;;AAED;EACE,0BAAyB;EACzB,aAAY;CACb","file":"ScheduleEditor.scss","sourcesContent":[".listContainer {\n  margin-top: 1rem;\n  overflow: auto;\n  position: relative;\n  padding: 1rem;\n  min-height: 0;\n  height: auto;\n}\n\n.listContainer > div {\n  // it somehow shows the horizontal scrollbar even when no needeit, this workaround to hide it\n  width: 95%;\n  // the tabs height based on flex box is otherwise wrongly calculated\n  position: absolute !important;\n}\n\n.state {\n  font-size: 0.8rem;\n  padding: 0.3rem;\n  display: inline-block;\n  text-align: center;\n  min-width: 4rem;\n}\n\n.error {\n  background-color: #da532c;\n  color: white;\n}\n\n.cancelled {\n  background-color: orange;\n  color: white;\n}\n\n.success {\n  background-color: #4CAF50;\n  color: white;\n}\n\n"],"sourceRoot":"webpack://"}]);
 	
 	// exports
 	exports.locals = {
-		"listContainer": "listContainer___2vlbv",
-		"state": "state___2jyma",
-		"error": "error___30LhV",
-		"cancelled": "cancelled___3S1EC",
-		"success": "success___jImHn"
+		"listContainer": "listContainer___aJHAE",
+		"state": "state___1rOi5",
+		"error": "error___3G79z",
+		"cancelled": "cancelled___1OTeY",
+		"success": "success___z5MBj"
 	};
 
 /***/ },
@@ -1581,6 +1581,11 @@
 	      this.normalizeUIState(this.props.entity);
 	    }
 	  }, {
+	    key: 'componentDidMount',
+	    value: function componentDidMount() {
+	      this.removeInvalidTemplateReferences();
+	    }
+	  }, {
 	    key: 'componentWillReceiveProps',
 	    value: function componentWillReceiveProps(nextProps) {
 	      // when component changes because another schedule is selected
@@ -1588,6 +1593,11 @@
 	      if (this.props.entity._id !== nextProps.entity._id) {
 	        this.normalizeUIState(nextProps.entity);
 	      }
+	    }
+	  }, {
+	    key: 'componentDidUpdate',
+	    value: function componentDidUpdate() {
+	      this.removeInvalidTemplateReferences();
 	    }
 	  }, {
 	    key: 'normalizeUIState',
@@ -1737,6 +1747,27 @@
 	      });
 	    }
 	  }, {
+	    key: 'removeInvalidTemplateReferences',
+	    value: function removeInvalidTemplateReferences() {
+	      var _props = this.props,
+	          entity = _props.entity,
+	          entities = _props.entities,
+	          onChange = _props.onChange;
+	
+	
+	      if (!entity.templateShortid) {
+	        return;
+	      }
+	
+	      var updatedTemplates = Object.keys(entities).filter(function (k) {
+	        return entities[k].__entitySet === 'templates' && entities[k].shortid === entity.templateShortid;
+	      });
+	
+	      if (updatedTemplates.length === 0) {
+	        onChange({ _id: entity._id, templateShortid: null });
+	      }
+	    }
+	  }, {
 	    key: 'onUseExpressionChange',
 	    value: function onUseExpressionChange(checked) {
 	      var entity = this.props.entity;
@@ -1764,9 +1795,9 @@
 	    value: function onCronBuilderChange(stateToSet, resetCron) {
 	      var cronExp = new _cronBuilder2.default();
 	
-	      var _props = this.props,
-	          onChange = _props.onChange,
-	          entity = _props.entity;
+	      var _props2 = this.props,
+	          onChange = _props2.onChange,
+	          entity = _props2.entity;
 	      var _state = this.state,
 	          selectedPeriod = _state.selectedPeriod,
 	          selectedHour = _state.selectedHour,
@@ -1965,10 +1996,10 @@
 	          selectedDay = _state2.selectedDay,
 	          selectedMonth = _state2.selectedMonth,
 	          days = _state2.days;
-	      var _props2 = this.props,
-	          entity = _props2.entity,
-	          entities = _props2.entities,
-	          _onChange = _props2.onChange;
+	      var _props3 = this.props,
+	          entity = _props3.entity,
+	          entities = _props3.entities,
+	          _onChange = _props3.onChange;
 	
 	      var templates = this.selectTemplates(entities);
 	      var cronDescription = '';
@@ -3816,15 +3847,15 @@
 	
 	
 	// module
-	exports.push([module.id, ".container___2flQX {\n  background: #fff;\n  border: 1px solid rgba(0, 0, 0, 0.2);\n  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);\n  border-radius: 4px;\n}\n\n.title___3ssmm {\n  background-color: #ccc;\n  font-size: 0.85rem;\n  text-align: center;\n  padding: 2px 0px;\n}\n\n.list___2yXjF {\n  font-size: 0.75rem;\n  max-height: 66px;\n  overflow-y: scroll;\n}\n\n.item___1RBnO {\n  cursor: pointer;\n  display: inline-block;\n  padding: 0.35rem;\n  text-align: center;\n  width: 21.60px;\n}\n\n.item___1RBnO:hover, .itemSelected___3DVIj {\n  background-color: #3B99FC;\n  color: #fff;\n}\n", "", {"version":3,"sources":["/./studio/studio/HourTimeSelect.scss"],"names":[],"mappings":"AACA;EACE,iBAAgB;EAChB,qCAAiC;EACjC,2CAAuC;EACvC,mBAAkB;CACnB;;AAED;EACE,uBAAsB;EACtB,mBAAkB;EAClB,mBAAkB;EAClB,iBAAgB;CACjB;;AAED;EACE,mBAAkB;EAClB,iBAAgB;EAChB,mBAAkB;CACnB;;AAED;EACE,gBAAe;EACf,sBAAqB;EACrB,iBAAgB;EAChB,mBAAkB;EAClB,eAAc;CAMf;;AAXD;EAQI,0BAAyB;EACzB,YAAW;CACZ","file":"HourTimeSelect.scss","sourcesContent":["\r\n.container {\r\n  background: #fff;\r\n  border: 1px solid rgba(0,0,0,0.2);\r\n  box-shadow: 0 3px 12px rgba(0,0,0,0.15);\r\n  border-radius: 4px;\r\n}\r\n\r\n.title {\r\n  background-color: #ccc;\r\n  font-size: 0.85rem;\r\n  text-align: center;\r\n  padding: 2px 0px;\r\n}\r\n\r\n.list {\r\n  font-size: 0.75rem;\r\n  max-height: 66px;\r\n  overflow-y: scroll;\r\n}\r\n\r\n.item {\r\n  cursor: pointer;\r\n  display: inline-block;\r\n  padding: 0.35rem;\r\n  text-align: center;\r\n  width: 21.60px;\r\n\r\n  &:hover, &Selected {\r\n    background-color: #3B99FC;\r\n    color: #fff;\r\n  }\r\n}\r\n"],"sourceRoot":"webpack://"}]);
+	exports.push([module.id, ".container___K1u5_ {\n  background: #fff;\n  border: 1px solid rgba(0, 0, 0, 0.2);\n  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);\n  border-radius: 4px;\n}\n\n.title___fzfhv {\n  background-color: #ccc;\n  font-size: 0.85rem;\n  text-align: center;\n  padding: 2px 0px;\n}\n\n.list___V0IoC {\n  font-size: 0.75rem;\n  max-height: 66px;\n  overflow-y: scroll;\n}\n\n.item___QmESg {\n  cursor: pointer;\n  display: inline-block;\n  padding: 0.35rem;\n  text-align: center;\n  width: 21.60px;\n}\n\n.item___QmESg:hover, .itemSelected___1GR6Z {\n  background-color: #3B99FC;\n  color: #fff;\n}\n", "", {"version":3,"sources":["/./studio/studio/HourTimeSelect.scss"],"names":[],"mappings":"AACA;EACE,iBAAgB;EAChB,qCAAiC;EACjC,2CAAuC;EACvC,mBAAkB;CACnB;;AAED;EACE,uBAAsB;EACtB,mBAAkB;EAClB,mBAAkB;EAClB,iBAAgB;CACjB;;AAED;EACE,mBAAkB;EAClB,iBAAgB;EAChB,mBAAkB;CACnB;;AAED;EACE,gBAAe;EACf,sBAAqB;EACrB,iBAAgB;EAChB,mBAAkB;EAClB,eAAc;CAMf;;AAXD;EAQI,0BAAyB;EACzB,YAAW;CACZ","file":"HourTimeSelect.scss","sourcesContent":["\n.container {\n  background: #fff;\n  border: 1px solid rgba(0,0,0,0.2);\n  box-shadow: 0 3px 12px rgba(0,0,0,0.15);\n  border-radius: 4px;\n}\n\n.title {\n  background-color: #ccc;\n  font-size: 0.85rem;\n  text-align: center;\n  padding: 2px 0px;\n}\n\n.list {\n  font-size: 0.75rem;\n  max-height: 66px;\n  overflow-y: scroll;\n}\n\n.item {\n  cursor: pointer;\n  display: inline-block;\n  padding: 0.35rem;\n  text-align: center;\n  width: 21.60px;\n\n  &:hover, &Selected {\n    background-color: #3B99FC;\n    color: #fff;\n  }\n}\n"],"sourceRoot":"webpack://"}]);
 	
 	// exports
 	exports.locals = {
-		"container": "container___2flQX",
-		"title": "title___3ssmm",
-		"list": "list___2yXjF",
-		"item": "item___1RBnO",
-		"itemSelected": "itemSelected___3DVIj"
+		"container": "container___K1u5_",
+		"title": "title___fzfhv",
+		"list": "list___V0IoC",
+		"item": "item___QmESg",
+		"itemSelected": "itemSelected___1GR6Z"
 	};
 
 /***/ },
