@@ -16,7 +16,9 @@ describe('with scheduling extension', function () {
     reporter.use(require('../')())
 
     await reporter.init()
+
     template = await reporter.documentStore.collection('templates').insert({
+      name: 'template-test',
       content: 'foo',
       engine: 'none',
       recipe: 'html'
@@ -25,6 +27,7 @@ describe('with scheduling extension', function () {
 
   it('creating schedule should add default values', async () => {
     const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: template.shortid
     })
@@ -36,6 +39,7 @@ describe('with scheduling extension', function () {
 
   it('updating schedule should recalculate nextRun', async () => {
     const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: template.shortid
     })
@@ -61,6 +65,7 @@ describe('with scheduling extension', function () {
     reporter.beforeRenderListeners.insert(0, 'test init', this, () => counter++)
 
     await reporter.documentStore.collection('templates').insert({
+      name: 'template-test',
       content: 'foo',
       recipe: 'html',
       engine: 'none'
@@ -73,6 +78,7 @@ describe('with scheduling extension', function () {
 
   it('updating schedule without template should throw', async () => {
     const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: template.shortid
     })
@@ -88,6 +94,7 @@ describe('with scheduling extension', function () {
 
   it('updating schedule without cron should throw', async () => {
     const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: template.shortid
     })
@@ -118,6 +125,7 @@ describe('with scheduling extension and minimal schedule interval limit', () => 
 
     await reporter.init()
     template = await reporter.documentStore.collection('templates').insert({
+      name: 'template-test',
       content: 'foo',
       engine: 'none',
       recipe: 'html'
@@ -126,6 +134,7 @@ describe('with scheduling extension and minimal schedule interval limit', () => 
 
   it('should pass with the bigger interval', () => {
     return reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '1 1 * * * *',
       templateShortid: template.shortid
     })
@@ -133,6 +142,7 @@ describe('with scheduling extension and minimal schedule interval limit', () => 
 
   it('should throw with the smaller interval', () => {
     return reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '1 * * * * *',
       templateShortid: template.shortid
     }).should.be.rejected()
@@ -140,6 +150,7 @@ describe('with scheduling extension and minimal schedule interval limit', () => 
 
   it('should throw with cron expression with less than 5 parts', () => {
     return reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '* * *',
       templateShortid: template.shortid
     }).should.be.rejected()

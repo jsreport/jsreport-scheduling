@@ -18,7 +18,9 @@ describe('for jobProcessor', () => {
     reporter.use(require('jsreport-reports')())
 
     await reporter.init()
+
     template = await reporter.documentStore.collection('templates').insert({
+      name: 'test',
       content: 'foo',
       engine: 'none',
       recipe: 'html'
@@ -30,6 +32,7 @@ describe('for jobProcessor', () => {
     reporter.scheduling.stop()
 
     await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: template.shortid
     })
@@ -59,6 +62,7 @@ describe('for jobProcessor', () => {
     reporter.scheduling.stop()
 
     await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: template.shortid
     })
@@ -83,6 +87,7 @@ describe('for jobProcessor', () => {
     reporter.scheduling.stop()
 
     const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: `* * * * * ${new Date().getMonth() + 1}`,
       templateShortid: template.shortid
     })
@@ -113,6 +118,7 @@ describe('for jobProcessor', () => {
     reporter.scheduling.stop()
 
     const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: `* * * * * ${new Date().getMonth() + 1}`,
       templateShortid: template.shortid
     })
@@ -161,6 +167,7 @@ describe('for jobProcessor', () => {
     reporter.scheduling.stop()
 
     await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: 'invalid'
     })
