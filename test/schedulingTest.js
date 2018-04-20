@@ -7,8 +7,10 @@ describe('with scheduling extension', function () {
 
   beforeEach(async () => {
     reporter = jsreport({
-      scheduling: {
-        minScheduleInterval: 0
+      extensions: {
+        scheduling: {
+          minScheduleInterval: 0
+        }
       }
     })
     reporter.use(require('jsreport-templates')())
@@ -115,8 +117,10 @@ describe('with scheduling extension and minimal schedule interval limit', () => 
 
   beforeEach(async () => {
     reporter = jsreport({
-      scheduling: {
-        minScheduleInterval: 120000
+      extensions: {
+        scheduling: {
+          minScheduleInterval: 120000
+        }
       }
     })
     reporter.use(require('../')())

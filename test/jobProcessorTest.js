@@ -8,8 +8,10 @@ describe('for jobProcessor', () => {
 
   beforeEach(async () => {
     reporter = jsreport({
-      scheduling: {
-        minScheduleInterval: 0
+      extensions: {
+        scheduling: {
+          minScheduleInterval: 0
+        }
       }
     })
 
