@@ -1,161 +1,162 @@
 require('should')
-var path = require('path')
-var Reporter = require('jsreport-core').Reporter
+const jsreport = require('jsreport-core')
 
 describe('with scheduling extension', function () {
-  var reporter
-  var template
+  let reporter
+  let template
 
-  beforeEach(function () {
-    reporter = new Reporter({
-      rootDirectory: path.join(__dirname, '../'),
-      scheduling: {
-        minScheduleInterval: 0
+  beforeEach(async () => {
+    reporter = jsreport({
+      extensions: {
+        scheduling: {
+          minScheduleInterval: 0
+        }
+      }
+    })
+    reporter.use(require('jsreport-templates')())
+    reporter.use(require('jsreport-reports')())
+    reporter.use(require('../')())
+
+    await reporter.init()
+
+    template = await reporter.documentStore.collection('templates').insert({
+      name: 'template-test',
+      content: 'foo',
+      engine: 'none',
+      recipe: 'html'
+    })
+  })
+
+  it('creating schedule should add default values', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      cron: '*/1 * * * * *',
+      templateShortid: template.shortid
+    })
+
+    schedule.nextRun.should.be.ok()
+    schedule.creationDate.should.be.ok()
+    schedule.state.should.be.exactly('planned')
+  })
+
+  it('updating schedule should recalculate nextRun', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      cron: '*/1 * * * * *',
+      templateShortid: template.shortid
+    })
+    await reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
+      $set: {
+        name: 'foo',
+        state: 'planned',
+        cron: '*/1 * * * * *',
+        nextRun: null,
+        templateShortid: template.shortid
       }
     })
 
-    return reporter.init().then(function () {
-      return reporter.documentStore.collection('templates').insert({
-        content: 'foo',
-        engine: 'none',
-        recipe: 'html'
-      }).then(function (t) {
-        template = t
-      })
-    })
+    const schedules = await reporter.documentStore.collection('schedules').find({})
+    schedules[0].nextRun.should.be.ok()
   })
 
-  it('creating schedule should add default values', function () {
-    return reporter.documentStore.collection('schedules').insert({
-      cron: '*/1 * * * * *',
-      templateShortid: template.shortid
-    }).then(function (schedule) {
-      schedule.nextRun.should.be.ok()
-      schedule.creationDate.should.be.ok()
-      schedule.state.should.be.exactly('planned')
-    })
-  })
-
-  it('updating schedule should recalculate nextRun', function () {
-    return reporter.documentStore.collection('schedules').insert({
-      cron: '*/1 * * * * *',
-      templateShortid: template.shortid
-    }).then(function (schedule) {
-      return reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
-        $set: {
-          name: 'foo',
-          state: 'planned',
-          cron: '*/1 * * * * *',
-          nextRun: null,
-          templateShortid: template.shortid
-        }
-      })
-    }).then(function () {
-      return reporter.documentStore.collection('schedules').find({}).then(function (schedules) {
-        schedules[0].nextRun.should.be.ok()
-      })
-    })
-  })
-
-  it('render process job should render report', function () {
+  it('render process job should render report', async () => {
     reporter.scheduling.stop()
 
-    var counter = 0
+    let counter = 0
 
-    reporter.beforeRenderListeners.insert(0, 'test init', this, function (request, response) {
-      counter++
-    })
+    reporter.beforeRenderListeners.insert(0, 'test init', this, () => counter++)
 
-    return reporter.documentStore.collection('templates').insert({
+    await reporter.documentStore.collection('templates').insert({
+      name: 'template-test',
       content: 'foo',
       recipe: 'html',
       engine: 'none'
-    }).then(function (template) {
-      return reporter.documentStore.collection('tasks').insert({}).then(function (task) {
-        return reporter.scheduling.renderReport({templateShortid: template.shortid}, task).then(function () {
-          counter.should.be.exactly(1)
-        })
-      })
     })
+
+    const task = await reporter.documentStore.collection('tasks').insert({})
+    await reporter.scheduling.renderReport({templateShortid: template.shortid}, task)
+    counter.should.be.exactly(1)
   })
 
-  it('updating schedule without template should throw', function () {
-    return reporter.documentStore.collection('schedules').insert({
+  it('updating schedule without template should throw', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: template.shortid
-    }).then(function (schedule) {
-      return reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
-        $set: {
-          name: 'foo2',
-          cron: '*/1 * * * * *',
-          state: 'planned'
-        }
-      }).catch(function () {
-        return 'validated'
-      })
-    }).then(function (res) {
-      res.should.be.eql('validated')
     })
+
+    return reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
+      $set: {
+        name: 'foo2',
+        cron: '*/1 * * * * *',
+        state: 'planned'
+      }
+    }).should.be.rejected()
   })
 
-  it('updating schedule without cron should throw', function () {
-    return reporter.documentStore.collection('schedules').insert({
+  it('updating schedule without cron should throw', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '*/1 * * * * *',
       templateShortid: template.shortid
-    }).then(function (schedule) {
-      return reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
-        $set: {
-          name: 'foo2',
-          templateShortid: template.shortid,
-          state: 'planned'
-        }
-      }).catch(function () {
-        return 'validated'
-      })
-    }).then(function (res) {
-      res.should.be.eql('validated')
     })
+
+    return reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
+      $set: {
+        name: 'foo2',
+        templateShortid: template.shortid,
+        state: 'planned'
+      }
+    }).should.be.rejected()
   })
 })
 
-describe('with scheduling extension and minimal schedule interval limit', function () {
-  var reporter
-  var template
+describe('with scheduling extension and minimal schedule interval limit', () => {
+  let reporter
+  let template
 
-  beforeEach(function () {
-    reporter = new Reporter({
-      rootDirectory: path.join(__dirname, '../'),
-      scheduling: {
-        minScheduleInterval: 120000
+  beforeEach(async () => {
+    reporter = jsreport({
+      extensions: {
+        scheduling: {
+          minScheduleInterval: 120000
+        }
       }
     })
+    reporter.use(require('../')())
+    reporter.use(require('jsreport-templates')())
+    reporter.use(require('jsreport-reports')())
 
-    return reporter.init().then(function () {
-      return reporter.documentStore.collection('templates').insert({
-        content: 'foo',
-        engine: 'none',
-        recipe: 'html'
-      }).then(function (t) {
-        template = t
-      })
+    await reporter.init()
+    template = await reporter.documentStore.collection('templates').insert({
+      name: 'template-test',
+      content: 'foo',
+      engine: 'none',
+      recipe: 'html'
     })
   })
 
-  it('should pass with the bigger interval', function () {
+  it('should pass with the bigger interval', () => {
     return reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '1 1 * * * *',
       templateShortid: template.shortid
     })
   })
 
-  it('should throw with the smaller interval', function () {
+  it('should throw with the smaller interval', () => {
     return reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
       cron: '1 * * * * *',
       templateShortid: template.shortid
-    }).catch(function (e) {
-      return 'validated'
-    }).then(function (res) {
-      res.should.be.eql('validated')
-    })
+    }).should.be.rejected()
+  })
+
+  it('should throw with cron expression with less than 5 parts', () => {
+    return reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      cron: '* * *',
+      templateShortid: template.shortid
+    }).should.be.rejected()
   })
 })

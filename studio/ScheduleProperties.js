@@ -38,12 +38,20 @@ export default class ScheduleProperties extends Component {
     this.normalizeUIState(this.props.entity)
   }
 
+  componentDidMount () {
+    this.removeInvalidTemplateReferences()
+  }
+
   componentWillReceiveProps (nextProps) {
     // when component changes because another schedule is selected
     // or when saving a new schedule
     if (this.props.entity._id !== nextProps.entity._id) {
       this.normalizeUIState(nextProps.entity)
     }
+  }
+
+  componentDidUpdate () {
+    this.removeInvalidTemplateReferences()
   }
 
   normalizeUIState (entity) {
@@ -247,6 +255,20 @@ export default class ScheduleProperties extends Component {
 
   selectTemplates (entities) {
     return Object.keys(entities).filter((k) => entities[k].__entitySet === 'templates').map((k) => entities[k])
+  }
+
+  removeInvalidTemplateReferences () {
+    const { entity, entities, onChange } = this.props
+
+    if (!entity.templateShortid) {
+      return
+    }
+
+    const updatedTemplates = Object.keys(entities).filter((k) => entities[k].__entitySet === 'templates' && entities[k].shortid === entity.templateShortid)
+
+    if (updatedTemplates.length === 0) {
+      onChange({ _id: entity._id, templateShortid: null })
+    }
   }
 
   onUseExpressionChange (checked) {
