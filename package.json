@@ -55,7 +55,7 @@
     "standard": "11.0.1"
   },
   "engines": {
-    "node": ">=8.0"
+    "node": ">=8.9"
   },
   "files": [
     "lib",
