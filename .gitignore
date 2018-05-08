@@ -33,6 +33,5 @@ prod.config.json
 
 .idea
 
-# temporary disable
-# studio/main.js
+studio/main.js
 studio/main.js.map
