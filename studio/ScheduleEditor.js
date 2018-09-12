@@ -24,8 +24,8 @@ export default class ScheduleEditor extends Component {
     return _activeReport
   }
 
-  componentWillMount () {
-    this.lazyFetch()
+  onTabActive () {
+    this.reloadTasks()
   }
 
   componentWillUnmount () {
