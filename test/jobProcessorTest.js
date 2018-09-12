@@ -90,7 +90,7 @@ describe('for jobProcessor', () => {
 
     const schedule = await reporter.documentStore.collection('schedules').insert({
       name: 'schedule-test',
-      cron: `* * * * * ${new Date().getMonth() + 1}`,
+      cron: `* * * * * ${new Date().getDay()}`,
       templateShortid: template.shortid
     })
     await reporter.documentStore.collection('tasks').insert({
@@ -121,7 +121,7 @@ describe('for jobProcessor', () => {
 
     const schedule = await reporter.documentStore.collection('schedules').insert({
       name: 'schedule-test',
-      cron: `* * * * * ${new Date().getMonth() + 1}`,
+      cron: `* * * * * ${new Date().getDay()}`,
       templateShortid: template.shortid
     })
 
