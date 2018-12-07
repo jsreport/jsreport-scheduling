@@ -66,13 +66,6 @@ describe('with scheduling extension', function () {
 
     reporter.beforeRenderListeners.insert(0, 'test init', this, () => counter++)
 
-    await reporter.documentStore.collection('templates').insert({
-      name: 'template-test',
-      content: 'foo',
-      recipe: 'html',
-      engine: 'none'
-    })
-
     const task = await reporter.documentStore.collection('tasks').insert({})
     await reporter.scheduling.renderReport({templateShortid: template.shortid}, task)
     counter.should.be.exactly(1)
