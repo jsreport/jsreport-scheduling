@@ -2,7 +2,10 @@ import React, { Component } from 'react'
 import ordinal from 'ordinal-number-suffix'
 import CronBuilder from 'cron-builder'
 import cronstrue from 'cronstrue'
+import Studio from 'jsreport-studio'
 import HourTimePicker from './HourTimePicker'
+
+const EntityRefSelect = Studio.EntityRefSelect
 
 export default class ScheduleProperties extends Component {
   constructor (props) {
@@ -253,10 +256,6 @@ export default class ScheduleProperties extends Component {
     }
   }
 
-  selectTemplates (entities) {
-    return Object.keys(entities).filter((k) => entities[k].__entitySet === 'templates').map((k) => entities[k])
-  }
-
   removeInvalidTemplateReferences () {
     const { entity, entities, onChange } = this.props
 
@@ -496,8 +495,7 @@ export default class ScheduleProperties extends Component {
       selectedMonth,
       days
     } = this.state
-    const { entity, entities, onChange } = this.props
-    const templates = this.selectTemplates(entities)
+    const { entity, onChange } = this.props
     let cronDescription = ''
 
     if (entity.cron) {
@@ -516,12 +514,12 @@ export default class ScheduleProperties extends Component {
       <div>
         <div className='form-group'>
           <label>Template</label>
-          <select
-            value={entity.templateShortid ? entity.templateShortid : ''}
-            onChange={(v) => onChange({_id: entity._id, templateShortid: v.target.value !== 'empty' ? v.target.value : null})}>
-            <option key='empty' value='empty'>- not selected -</option>
-            {templates.map((e) => <option key={e.shortid} value={e.shortid}>{e.name}</option>)}
-          </select>
+          <EntityRefSelect
+            headingLabel='Select template'
+            filter={(references) => ({ templates: references.templates })}
+            value={entity.templateShortid ? entity.templateShortid : null}
+            onChange={(selected) => onChange({ _id: entity._id, templateShortid: selected != null && selected.length > 0 ? selected[0].shortid : null })}
+          />
         </div>
         <div className='form-group'>
           <label>CRON</label>
