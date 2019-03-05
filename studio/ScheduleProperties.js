@@ -60,7 +60,7 @@ export default class ScheduleProperties extends Component {
   normalizeUIState (entity) {
     let cronInfo
 
-    if (entity.__isNew || !entity.cron) {
+    if ((entity.__isNew && !entity.cron) || !entity.cron) {
       cronInfo = this.onPeriodChange('', true)
     } else {
       cronInfo = this.getCronInformation(entity.cron)
