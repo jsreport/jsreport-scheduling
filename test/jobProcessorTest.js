@@ -45,19 +45,20 @@ describe('for jobProcessor', () => {
       return Promise.resolve()
     }
 
-    const jobProcessor = new JobProcessor(
-      exec,
-      reporter.documentStore,
-      reporter.logger,
-      reporter.scheduling.TaskType,
-      reporter.Request,
-      {
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: exec,
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
         interval: 50,
         maxParallelJobs: 1,
         // mark now as 1 second in future in order to find the schedule
         now: () => new Date(new Date().getTime() + 1000)
       }
-    )
+    })
 
     await jobProcessor.process({waitForJobToFinish: true})
     const tasks = await reporter.documentStore.collection('tasks').find({})
@@ -83,19 +84,20 @@ describe('for jobProcessor', () => {
       return Promise.resolve()
     }
 
-    const jobProcessor = new JobProcessor(
-      exec,
-      reporter.documentStore,
-      reporter.logger,
-      reporter.scheduling.TaskType,
-      reporter.Request,
-      {
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: exec,
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
         interval: 50,
         maxParallelJobs: 0,
         // mark now as 1 second in future in order to find the schedule
         now: () => new Date(new Date().getTime() + 1000)
       }
-    )
+    })
     await jobProcessor.process({waitForJobToFinish: true})
     counter.should.be.exactly(0)
   })
@@ -121,18 +123,19 @@ describe('for jobProcessor', () => {
       return Promise.resolve()
     }
 
-    const jobProcessor = new JobProcessor(
-      exec,
-      reporter.documentStore,
-      reporter.logger,
-      reporter.scheduling.TaskType,
-      reporter.Request,
-      {
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: exec,
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
         interval: 20,
         maxParallelJobs: 1,
         taskPingTimeout: 10
       }
-    )
+    })
 
     await jobProcessor.process({waitForJobToFinish: true})
     counter.should.be.exactly(1)
@@ -157,17 +160,18 @@ describe('for jobProcessor', () => {
       return Promise.resolve()
     }
 
-    const jobProcessor = new JobProcessor(
-      exec,
-      reporter.documentStore,
-      reporter.logger,
-      reporter.scheduling.TaskType,
-      reporter.Request,
-      {
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: exec,
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
         interval: 20,
         maxParallelJobs: 1
       }
-    )
+    })
 
     jobProcessor.currentlyRunningTasks.push(task)
 
@@ -184,17 +188,19 @@ describe('for jobProcessor', () => {
       state: 'running',
       scheduleShortid: 'invalid'
     })
-    const jobProcessor = new JobProcessor(
-      function () {},
-      reporter.documentStore,
-      reporter.logger,
-      reporter.scheduling.TaskType,
-      reporter.Request,
-      {
+
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: function () {},
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
         interval: 50,
         maxParallelJobs: 1
       }
-    )
+    })
 
     const tasks = await jobProcessor._findTasksToRecover()
 
@@ -211,19 +217,20 @@ describe('for jobProcessor', () => {
       templateShortid: 'invalid'
     })
 
-    const jobProcessor = new JobProcessor(
-      function () { },
-      reporter.documentStore,
-      reporter.logger,
-      reporter.scheduling.TaskType,
-      reporter.Request,
-      {
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: function () { },
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
         interval: 50,
         maxParallelJobs: 1,
         // mark now as 1 second in future in order to find the schedule
         now: () => new Date(new Date().getTime() + 1000)
       }
-    )
+    })
 
     await jobProcessor.process({waitForJobToFinish: true})
     const tasks = await reporter.documentStore.collection('tasks').find({})
