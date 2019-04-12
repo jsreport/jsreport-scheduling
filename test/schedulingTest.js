@@ -59,6 +59,34 @@ describe('with scheduling extension', function () {
     schedules[0].nextRun.should.be.ok()
   })
 
+  it('enabling a schedule should initialize nextRun again', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      cron: '*/1 * * * * *',
+      templateShortid: template.shortid,
+      enabled: false
+    })
+
+    // wait 1s
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1000)
+    })
+
+    await reporter.documentStore.collection('schedules').update({
+      _id: schedule._id
+    }, {
+      $set: {
+        enabled: true
+      }
+    })
+
+    const afterUpdateSchedule = await reporter.documentStore.collection('schedules').findOne({
+      _id: schedule._id
+    })
+
+    schedule.nextRun.getTime().should.be.not.eql(afterUpdateSchedule.nextRun.getTime())
+  })
+
   it('render process job should render report', async () => {
     reporter.scheduling.stop()
 
