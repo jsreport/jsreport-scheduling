@@ -239,3 +239,80 @@ describe('for jobProcessor', () => {
     tasks[0].error.should.containEql('Template')
   })
 })
+
+describe('for jobProcessor with auth enabled', () => {
+  let reporter
+  let template
+
+  beforeEach(async () => {
+    reporter = jsreport({
+      extensions: {
+        scheduling: {
+          minScheduleInterval: 0
+        }
+      }
+    })
+
+    reporter.use(require('../')())
+    reporter.use(require('jsreport-templates')())
+    reporter.use(require('jsreport-authentication')({
+      admin: {
+        username: 'admin',
+        password: 'password'
+      },
+      cookieSession: {
+        secret: 'foo'
+      }
+    }))
+    reporter.use(require('jsreport-authorization')())
+    reporter.use(require('jsreport-reports')())
+
+    await reporter.init()
+
+    template = await reporter.documentStore.collection('templates').insert({
+      name: 'test',
+      content: 'foo',
+      engine: 'none',
+      recipe: 'html'
+    })
+  })
+
+  it('process should call handler and create task', async function () {
+    this.timeout(3000)
+    reporter.scheduling.stop()
+
+    await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      cron: '*/1 * * * * *',
+      templateShortid: template.shortid
+    })
+    let counter = 0
+
+    function exec () {
+      counter++
+      return Promise.resolve()
+    }
+
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: exec,
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
+        interval: 50,
+        maxParallelJobs: 1,
+        // mark now as 1 second in future in order to find the schedule
+        now: () => new Date(new Date().getTime() + 1000)
+      }
+    })
+
+    await jobProcessor.process({waitForJobToFinish: true})
+    const tasks = await reporter.documentStore.collection('tasks').find({})
+    tasks.length.should.be.exactly(1)
+    tasks[0].state.should.be.exactly('success')
+    tasks[0].finishDate.should.be.ok()
+    counter.should.be.exactly(1)
+  })
+})
