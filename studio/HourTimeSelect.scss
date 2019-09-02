@@ -1,13 +1,14 @@
 
 .container {
-  background: #fff;
-  border: 1px solid rgba(0,0,0,0.2);
-  box-shadow: 0 3px 12px rgba(0,0,0,0.15);
+  background: $popover-backgroundColor;
+  border: 1px solid $popover-borderColor;
+  box-shadow: 0 3px 12px $popover-shadowColor;
   border-radius: 4px;
 }
 
 .title {
-  background-color: #ccc;
+  background-color: $primary-selection-backgroundColor;
+  color: $primary-selection-color;
   font-size: 0.85rem;
   text-align: center;
   padding: 2px 0px;
@@ -25,9 +26,9 @@
   padding: 0.35rem;
   text-align: center;
   width: 21.60px;
+}
 
-  &:hover, &Selected {
-    background-color: #3B99FC;
-    color: #fff;
-  }
+.item:hover, .itemSelected {
+  background-color: $primary-hover-backgroundColor;
+  color: $primary-hover-color;
 }

@@ -8,9 +8,9 @@
 }
 
 .listContainer > div {
-  // it somehow shows the horizontal scrollbar even when no needeit, this workaround to hide it
+  /* it somehow shows the horizontal scrollbar even when no needeit, this workaround to hide it */
   width: 95%;
-  // the tabs height based on flex box is otherwise wrongly calculated
+  /* the tabs height based on flex box is otherwise wrongly calculated */
   position: absolute !important;
 }
 
@@ -36,4 +36,3 @@
   background-color: #4CAF50;
   color: white;
 }
-
