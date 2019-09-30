@@ -36,3 +36,5 @@ prod.config.json
 
 # studio/main.js
 # studio/main.js.map
+
+.vscode
