@@ -9,6 +9,7 @@ module.exports = {
           autoStart: { type: 'boolean' },
           interval: { type: 'number' },
           minScheduleInterval: { type: 'number' },
+          misfireThreshold: { type: 'number' },
           maxParallelJobs: { type: 'number' },
           taskPingTimeout: { type: 'number' }
         }

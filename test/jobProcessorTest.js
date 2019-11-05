@@ -180,6 +180,104 @@ describe('for jobProcessor', () => {
     tasks[0].ping.should.not.be.exactly(task.ping)
   })
 
+  it('should run misfired schedule by default', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      state: 'planned',
+      // each hour
+      cron: '0 * * * *',
+      templateShortid: template.shortid,
+      enabled: true
+    })
+
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: exec,
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
+        interval: 20,
+        maxParallelJobs: 1
+      }
+    })
+
+    function exec () {
+      return Promise.resolve()
+    }
+
+    await reporter.documentStore.collection('schedules').update({
+      _id: schedule._id
+    }, {
+      $set: {
+        // 3 hours ago
+        nextRun: jobProcessor.getNextRun(schedule, new Date(Date.now() - (3 * 60 * 60000)))
+      }
+    })
+
+    await jobProcessor.process({waitForJobToFinish: true})
+
+    const tasks = await reporter.documentStore.collection('tasks').find({})
+
+    tasks.should.have.length(1)
+    tasks[0].state.should.be.eql('success')
+  })
+
+  it('should not run misfired schedules when misfireThreshold is set', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      state: 'planned',
+      // each hour
+      cron: '0 * * * *',
+      templateShortid: template.shortid,
+      enabled: true
+    })
+
+    const jobProcessor = new JobProcessor({
+      beforeProcessJobListeners: reporter.createListenerCollection(),
+      executionHandler: exec,
+      documentStore: reporter.documentStore,
+      logger: reporter.logger,
+      Request: reporter.Request,
+      TaskType: reporter.scheduling.TaskType,
+      options: {
+        interval: 20,
+        misfireThreshold: 120000, // 2min
+        maxParallelJobs: 1
+      }
+    })
+
+    function exec () {
+      return Promise.resolve()
+    }
+
+    const lastRun = jobProcessor.getNextRun(schedule, new Date(Date.now() - (3 * 60 * 60000)))
+
+    await reporter.documentStore.collection('schedules').update({
+      _id: schedule._id
+    }, {
+      $set: {
+        // 3 hours ago
+        nextRun: lastRun
+      }
+    })
+
+    const now = new Date()
+
+    await jobProcessor.process({waitForJobToFinish: true})
+
+    const tasks = await reporter.documentStore.collection('tasks').find({})
+
+    const sched = await reporter.documentStore.collection('schedules').findOne({
+      _id: schedule._id
+    })
+
+    sched.nextRun.getTime().should.be.greaterThan(now)
+
+    tasks.should.have.length(0)
+  })
+
   it('_findTasksToRecover should skip tasks without schedules', async () => {
     reporter.scheduling.stop()
 

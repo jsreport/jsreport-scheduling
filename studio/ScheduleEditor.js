@@ -25,6 +25,7 @@ export default class ScheduleEditor extends Component {
   }
 
   onTabActive () {
+    this.updateNextRun()
     this.reloadTasks()
   }
 
@@ -107,6 +108,7 @@ export default class ScheduleEditor extends Component {
         }
       })
 
+      this.updateNextRun()
       this.reloadTasks()
     } finally {
       this.setState({

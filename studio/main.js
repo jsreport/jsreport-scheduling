@@ -187,6 +187,7 @@ var ScheduleEditor = function (_Component) {
   _createClass(ScheduleEditor, [{
     key: 'onTabActive',
     value: function onTabActive() {
+      this.updateNextRun();
       this.reloadTasks();
     }
   }, {
@@ -364,22 +365,23 @@ var ScheduleEditor = function (_Component) {
 
               case 4:
 
+                this.updateNextRun();
                 this.reloadTasks();
 
-              case 5:
-                _context5.prev = 5;
+              case 6:
+                _context5.prev = 6;
 
                 this.setState({
                   running: false
                 });
-                return _context5.finish(5);
+                return _context5.finish(6);
 
-              case 8:
+              case 9:
               case 'end':
                 return _context5.stop();
             }
           }
-        }, _callee5, this, [[1,, 5, 8]]);
+        }, _callee5, this, [[1,, 6, 9]]);
       }));
 
       function runNow() {
