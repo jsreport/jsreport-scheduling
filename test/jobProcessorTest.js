@@ -181,18 +181,19 @@ describe('for jobProcessor', () => {
   })
 
   it('should run misfired schedule by default', async () => {
+    reporter.scheduling.stop()
+
     const schedule = await reporter.documentStore.collection('schedules').insert({
       name: 'schedule-test',
       state: 'planned',
-      // each hour
-      cron: '0 * * * *',
+      cron: '0 * * * *', // each hour
       templateShortid: template.shortid,
       enabled: true
     })
 
     const jobProcessor = new JobProcessor({
       beforeProcessJobListeners: reporter.createListenerCollection(),
-      executionHandler: exec,
+      executionHandler: () => Promise.resolve(),
       documentStore: reporter.documentStore,
       logger: reporter.logger,
       Request: reporter.Request,
@@ -202,10 +203,6 @@ describe('for jobProcessor', () => {
         maxParallelJobs: 1
       }
     })
-
-    function exec () {
-      return Promise.resolve()
-    }
 
     await reporter.documentStore.collection('schedules').update({
       _id: schedule._id
@@ -225,18 +222,19 @@ describe('for jobProcessor', () => {
   })
 
   it('should not run misfired schedules when misfireThreshold is set', async () => {
+    reporter.scheduling.stop()
+
     const schedule = await reporter.documentStore.collection('schedules').insert({
       name: 'schedule-test',
       state: 'planned',
-      // each hour
-      cron: '0 * * * *',
+      cron: '0 * * * *', // each hour
       templateShortid: template.shortid,
       enabled: true
     })
 
     const jobProcessor = new JobProcessor({
       beforeProcessJobListeners: reporter.createListenerCollection(),
-      executionHandler: exec,
+      executionHandler: () => Promise.resolve(),
       documentStore: reporter.documentStore,
       logger: reporter.logger,
       Request: reporter.Request,
@@ -248,18 +246,13 @@ describe('for jobProcessor', () => {
       }
     })
 
-    function exec () {
-      return Promise.resolve()
-    }
-
     const lastRun = jobProcessor.getNextRun(schedule, new Date(Date.now() - (3 * 60 * 60000)))
 
     await reporter.documentStore.collection('schedules').update({
       _id: schedule._id
     }, {
       $set: {
-        // 3 hours ago
-        nextRun: lastRun
+        nextRun: lastRun // 3 hours ago
       }
     })
 
@@ -274,7 +267,6 @@ describe('for jobProcessor', () => {
     })
 
     sched.nextRun.getTime().should.be.greaterThan(now)
-
     tasks.should.have.length(0)
   })
 
