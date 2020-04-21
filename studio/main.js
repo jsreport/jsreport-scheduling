@@ -230,7 +230,7 @@ var ScheduleEditor = function (_Component) {
 
 
                 if (report.contentType === 'text/html' || report.contentType === 'text/plain' || report.contentType === 'application/pdf' || report.contentType && report.contentType.indexOf('image') !== -1) {
-                  _jsreportStudio2.default.setPreviewFrameSrc('/reports/' + report._id + '/content');
+                  _jsreportStudio2.default.setPreviewFrameSrc(_jsreportStudio2.default.rootUrl + '/reports/' + report._id + '/content');
                 } else {
                   window.open(_jsreportStudio2.default.rootUrl + '/reports/' + report._id + '/attachment', '_self');
                 }

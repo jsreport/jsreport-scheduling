@@ -48,9 +48,13 @@ export default class ScheduleEditor extends Component {
       const reports = await Studio.api.get(`/odata/reports?$filter=taskId eq '${t._id}'`)
       const report = reports.value[0]
 
-      if (report.contentType === 'text/html' || report.contentType === 'text/plain' ||
-        report.contentType === 'application/pdf' || (report.contentType && report.contentType.indexOf('image') !== -1)) {
-        Studio.setPreviewFrameSrc(`/reports/${report._id}/content`)
+      if (
+        report.contentType === 'text/html' ||
+        report.contentType === 'text/plain' ||
+        report.contentType === 'application/pdf' ||
+        (report.contentType && report.contentType.indexOf('image') !== -1)
+      ) {
+        Studio.setPreviewFrameSrc(`${Studio.rootUrl}/reports/${report._id}/content`)
       } else {
         window.open(`${Studio.rootUrl}/reports/${report._id}/attachment`, '_self')
       }
