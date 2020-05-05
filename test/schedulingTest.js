@@ -99,7 +99,7 @@ describe('with scheduling extension', function () {
     counter.should.be.exactly(1)
   })
 
-  it('updating schedule without template should throw', async () => {
+  it('updating enabled schedule with empty template should throw', async () => {
     const schedule = await reporter.documentStore.collection('schedules').insert({
       name: 'schedule-test',
       cron: '*/1 * * * * *',
@@ -110,12 +110,37 @@ describe('with scheduling extension', function () {
       $set: {
         name: 'foo2',
         cron: '*/1 * * * * *',
+        templateShortid: null,
         state: 'planned'
       }
-    }).should.be.rejected()
+    }).should.be.rejectedWith(/needs to include template/)
   })
 
-  it('updating schedule without cron should throw', async () => {
+  it('updating disabled schedule with empty template should be fine', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      cron: '*/1 * * * * *',
+      templateShortid: template.shortid,
+      enabled: false
+    })
+
+    await reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
+      $set: {
+        name: 'foo2',
+        cron: '*/1 * * * * *',
+        templateShortid: null,
+        state: 'planned'
+      }
+    })
+
+    const existingSchedule = await reporter.documentStore.collection('schedules').findOne({
+      name: 'foo2'
+    })
+
+    existingSchedule.templateShortid.should.be.eql('')
+  })
+
+  it('updating schedule with empty cron should throw', async () => {
     const schedule = await reporter.documentStore.collection('schedules').insert({
       name: 'schedule-test',
       cron: '*/1 * * * * *',
@@ -125,10 +150,28 @@ describe('with scheduling extension', function () {
     return reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
       $set: {
         name: 'foo2',
+        cron: null,
         templateShortid: template.shortid,
         state: 'planned'
       }
-    }).should.be.rejected()
+    }).should.be.rejectedWith(/cron expression must be set/)
+  })
+
+  it('updating schedule with invalid cron should throw', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      cron: '*/1 * * * * *',
+      templateShortid: template.shortid
+    })
+
+    return reporter.documentStore.collection('schedules').update({shortid: schedule.shortid}, {
+      $set: {
+        name: 'foo2',
+        cron: 'dsdsd',
+        templateShortid: template.shortid,
+        state: 'planned'
+      }
+    }).should.be.rejectedWith(/invalid cron pattern/)
   })
 })
 
