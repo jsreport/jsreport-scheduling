@@ -14,6 +14,7 @@ Studio.initializeListeners.push(async () => {
     visibleName: 'schedule',
     entityTreePosition: 400
   })
+
   Studio.addEditorComponent('schedules', ScheduleEditor)
   Studio.addPropertiesComponent(ScheduleProperties.title, ScheduleProperties, (entity) => entity.__entitySet === 'schedules')
   Studio.addToolbarComponent(DownloadButton)
