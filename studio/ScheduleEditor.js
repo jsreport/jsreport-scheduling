@@ -1,3 +1,4 @@
+import PropTypes from 'prop-types'
 import React, { Component } from 'react'
 import ReactList from 'react-list'
 import Studio from 'jsreport-studio'
@@ -205,6 +206,6 @@ export default class ScheduleEditor extends Component {
 }
 
 ScheduleEditor.propTypes = {
-  entity: React.PropTypes.object.isRequired,
-  onUpdate: React.PropTypes.func.isRequired
+  entity: PropTypes.object.isRequired,
+  onUpdate: PropTypes.func.isRequired
 }
