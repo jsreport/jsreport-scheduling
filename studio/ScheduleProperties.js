@@ -37,23 +37,18 @@ export default class ScheduleProperties extends Component {
     return `schedule (${templates[0].name}) ${entity.enabled !== true && entity.enabled != null ? '(disabled)' : ''}`
   }
 
-  componentWillMount () {
-    this.normalizeUIState(this.props.entity)
-  }
-
   componentDidMount () {
+    this.normalizeUIState(this.props.entity)
     this.removeInvalidTemplateReferences()
   }
 
-  componentWillReceiveProps (nextProps) {
+  componentDidUpdate (prevProps) {
     // when component changes because another schedule is selected
     // or when saving a new schedule
-    if (this.props.entity._id !== nextProps.entity._id) {
-      this.normalizeUIState(nextProps.entity)
+    if (prevProps.entity._id !== this.props.entity._id) {
+      this.normalizeUIState(this.props.entity)
     }
-  }
 
-  componentDidUpdate () {
     this.removeInvalidTemplateReferences()
   }
 

@@ -1322,27 +1322,20 @@ var ScheduleProperties = function (_Component) {
   }
 
   _createClass(ScheduleProperties, [{
-    key: 'componentWillMount',
-    value: function componentWillMount() {
-      this.normalizeUIState(this.props.entity);
-    }
-  }, {
     key: 'componentDidMount',
     value: function componentDidMount() {
+      this.normalizeUIState(this.props.entity);
       this.removeInvalidTemplateReferences();
     }
   }, {
-    key: 'componentWillReceiveProps',
-    value: function componentWillReceiveProps(nextProps) {
+    key: 'componentDidUpdate',
+    value: function componentDidUpdate(prevProps) {
       // when component changes because another schedule is selected
       // or when saving a new schedule
-      if (this.props.entity._id !== nextProps.entity._id) {
-        this.normalizeUIState(nextProps.entity);
+      if (prevProps.entity._id !== this.props.entity._id) {
+        this.normalizeUIState(this.props.entity);
       }
-    }
-  }, {
-    key: 'componentDidUpdate',
-    value: function componentDidUpdate() {
+
       this.removeInvalidTemplateReferences();
     }
   }, {
