@@ -1,4 +1,3 @@
-import PropTypes from 'prop-types'
 import React, { Component } from 'react'
 import ReactList from 'react-list'
 import Studio from 'jsreport-studio'
@@ -6,7 +5,8 @@ import _debounce from 'lodash/debounce'
 import style from './ScheduleEditor.scss'
 
 let _activeReport
-export default class ScheduleEditor extends Component {
+
+class ScheduleEditor extends Component {
   constructor () {
     super()
     this.state = { tasks: [], active: null, running: false }
@@ -205,7 +205,4 @@ export default class ScheduleEditor extends Component {
   }
 }
 
-ScheduleEditor.propTypes = {
-  entity: PropTypes.object.isRequired,
-  onUpdate: PropTypes.func.isRequired
-}
+export default ScheduleEditor

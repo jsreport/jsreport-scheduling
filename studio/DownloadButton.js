@@ -1,9 +1,8 @@
-import PropTypes from 'prop-types'
 import React, { Component } from 'react'
 import ScheduleEditor from './ScheduleEditor'
 import Studio from 'jsreport-studio'
 
-export default class DownloadButton extends Component {
+class DownloadButton extends Component {
   download () {
     if (ScheduleEditor.ActiveReport) {
       window.open(`${Studio.rootUrl}/reports/${ScheduleEditor.ActiveReport._id}/attachment`, '_self')
@@ -21,7 +20,4 @@ export default class DownloadButton extends Component {
   }
 }
 
-DownloadButton.propTypes = {
-  tab: PropTypes.object,
-  onUpdate: PropTypes.func.isRequired
-}
+export default DownloadButton
