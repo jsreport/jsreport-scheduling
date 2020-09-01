@@ -224,3 +224,90 @@ describe('with scheduling extension and minimal schedule interval limit', () => 
     }).should.be.rejected()
   })
 })
+
+describe('with scheduling extension and history clean enabled', () => {
+  let reporter
+  let template
+
+  beforeEach(async () => {
+    reporter = jsreport({
+      extensions: {
+        scheduling: {
+          cleanScheduleHistoryInterval: 500,
+          maxHistoryPerSchedule: 2
+        }
+      }
+    })
+
+    reporter.use(require('../')())
+    reporter.use(require('jsreport-templates')())
+    reporter.use(require('jsreport-reports')())
+
+    await reporter.init()
+
+    template = await reporter.documentStore.collection('templates').insert({
+      name: 'template-test',
+      content: 'foo',
+      engine: 'none',
+      recipe: 'html'
+    })
+  })
+
+  afterEach(() => reporter && reporter.close())
+
+  it('should clean history', async () => {
+    const schedule = await reporter.documentStore.collection('schedules').insert({
+      name: 'schedule-test',
+      cron: '* * * * *',
+      templateShortid: template.shortid
+    })
+
+    const getTask = ({ creationDate, state, ...rest }) => {
+      return {
+        ...rest,
+        creationDate,
+        scheduleShortid: schedule.shortid,
+        state: state,
+        ping: creationDate
+      }
+    }
+
+    await reporter.documentStore.collection('tasks').insert(getTask({
+      creationDate: new Date(Date.now() - 800),
+      state: 'error',
+      error: 'Error'
+    }))
+
+    await reporter.documentStore.collection('tasks').insert(getTask({
+      creationDate: new Date(Date.now() - 700),
+      state: 'error',
+      error: 'Error'
+    }))
+
+    await reporter.documentStore.collection('tasks').insert(getTask({
+      creationDate: new Date(Date.now() - 600),
+      state: 'error',
+      error: 'Error'
+    }))
+
+    await reporter.documentStore.collection('tasks').insert(getTask({
+      creationDate: new Date(Date.now() - 500),
+      state: 'success'
+    }))
+
+    await delay(500)
+
+    const results = await reporter.documentStore.collection('tasks').find({
+      scheduleShortid: schedule.shortid
+    })
+
+    results.should.have.length(2)
+
+    results.should.matchSome((t) => t.state.should.be.eql('error'))
+    results.should.matchSome((t) => t.state.should.be.eql('success'))
+  })
+})
+
+function delay (timeToWait) {
+  return new Promise((resolve) => setTimeout(resolve, timeToWait))
+}
