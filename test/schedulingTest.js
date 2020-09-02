@@ -272,39 +272,102 @@ describe('with scheduling extension and history clean enabled', () => {
       }
     }
 
-    await reporter.documentStore.collection('tasks').insert(getTask({
-      creationDate: new Date(Date.now() - 800),
-      state: 'error',
-      error: 'Error'
-    }))
+    const now = Date.now()
 
-    await reporter.documentStore.collection('tasks').insert(getTask({
-      creationDate: new Date(Date.now() - 700),
-      state: 'error',
-      error: 'Error'
-    }))
-
-    await reporter.documentStore.collection('tasks').insert(getTask({
-      creationDate: new Date(Date.now() - 600),
-      state: 'error',
-      error: 'Error'
-    }))
-
-    await reporter.documentStore.collection('tasks').insert(getTask({
-      creationDate: new Date(Date.now() - 500),
+    const t1 = await reporter.documentStore.collection('tasks').insert(getTask({
+      _id: '1',
       state: 'success'
     }))
 
-    await delay(500)
+    await reporter.documentStore.collection('tasks').update({
+      _id: t1._id
+    }, {
+      $set: {
+        creationDate: new Date(now - 900)
+      }
+    })
+
+    const t2 = await reporter.documentStore.collection('tasks').insert(getTask({
+      _id: '2',
+      state: 'error',
+      error: 'Error'
+    }))
+
+    await reporter.documentStore.collection('tasks').update({
+      _id: t2._id
+    }, {
+      $set: {
+        creationDate: new Date(now - 800)
+      }
+    })
+
+    const t3 = await reporter.documentStore.collection('tasks').insert(getTask({
+      _id: '3',
+      state: 'error',
+      error: 'Error'
+    }))
+
+    await reporter.documentStore.collection('tasks').update({
+      _id: t3._id
+    }, {
+      $set: {
+        creationDate: new Date(now - 700)
+      }
+    })
+
+    const tError = await reporter.documentStore.collection('tasks').insert(getTask({
+      _id: '4',
+      state: 'error',
+      error: 'Error'
+    }))
+
+    await reporter.documentStore.collection('tasks').update({
+      _id: tError._id
+    }, {
+      $set: {
+        creationDate: new Date(now - 600)
+      }
+    })
+
+    const tRunning = await reporter.documentStore.collection('tasks').insert(getTask({
+      _id: '5',
+      creationDate: new Date(now - 500),
+      state: 'running'
+    }))
+
+    await reporter.documentStore.collection('tasks').update({
+      _id: tRunning._id
+    }, {
+      $set: {
+        creationDate: new Date(now - 400)
+      }
+    })
+
+    const tSuccess = await reporter.documentStore.collection('tasks').insert(getTask({
+      _id: '6',
+      creationDate: new Date(now - 300),
+      state: 'success'
+    }))
+
+    await reporter.documentStore.collection('tasks').update({
+      _id: tSuccess._id
+    }, {
+      $set: {
+        creationDate: new Date(now - 200)
+      }
+    })
+
+    await delay(700)
 
     const results = await reporter.documentStore.collection('tasks').find({
       scheduleShortid: schedule.shortid
     })
 
-    results.should.have.length(2)
+    results.should.have.length(3)
 
-    results.should.matchSome((t) => t.state.should.be.eql('error'))
-    results.should.matchSome((t) => t.state.should.be.eql('success'))
+    results.should.matchSome((t) => t._id.should.be.eql(tRunning._id) && t.state.should.be.eql('running'))
+    results.should.matchSome((t) => t._id.should.be.eql(tError._id) && t.state.should.be.eql('error'))
+    results.should.matchSome((t) => t._id.should.be.eql(tSuccess._id) && t.state.should.be.eql('success'))
   })
 })
 
