@@ -1,3 +1,6 @@
+**⚠️ This repository has been moved to the monorepo [jsreport/jsreport](https://github.com/jsreport/jsreport)**
+--
+
 # jsreport-scheduling
 [![NPM Version](http://img.shields.io/npm/v/jsreport-scheduling.svg?style=flat-square)](https://npmjs.com/package/jsreport-scheduling)
 [![Build Status](https://travis-ci.org/jsreport/jsreport-scheduling.png?branch=master)](https://travis-ci.org/jsreport/jsreport-scheduling)
