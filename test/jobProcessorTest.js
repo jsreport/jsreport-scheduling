@@ -107,9 +107,10 @@ describe('for jobProcessor', () => {
 
     const schedule = await reporter.documentStore.collection('schedules').insert({
       name: 'schedule-test',
-      cron: `* * * * * ${new Date().getDay()}`,
+      cron: `15 4 * * *`,
       templateShortid: template.shortid
     })
+
     await reporter.documentStore.collection('tasks').insert({
       ping: new Date(1),
       state: 'running',
@@ -139,6 +140,9 @@ describe('for jobProcessor', () => {
 
     await jobProcessor.process({waitForJobToFinish: true})
     counter.should.be.exactly(1)
+
+    const updatedSchedule = await reporter.documentStore.collection('schedules').findOne({shortid: schedule.shortid})
+    updatedSchedule.nextRun.getTime().should.be.exactly(schedule.nextRun.getTime())
   })
 
   it('should ping running tasks', async () => {
